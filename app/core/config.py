@@ -134,6 +134,7 @@ class Gate1DetectorSettings(StrictModel):
     score_full: float = Field(gt=0, le=1)
     min_box_score: float = Field(ge=0, le=1)
     max_species_boxes: int = Field(ge=1)
+    lookalikes: list[str]
     video_frames: int = Field(ge=1)
 
     @model_validator(mode="after")
@@ -165,6 +166,7 @@ class Gate1Settings(StrictModel):
     animals: dict[str, list[str]]
     insect_categories: list[str]
     wild_check_categories: list[str]
+    always_review_categories: list[str]
     no_pet: list[str]
     photo: list[str]
     illustration: list[str]
@@ -173,11 +175,15 @@ class Gate1Settings(StrictModel):
     detector: Gate1DetectorSettings
     fusion: Gate1FusionSettings
     species_min_confidence: float = Field(ge=0, le=1)
+    species_category_min_confidence: float = Field(ge=0, le=1)
     species: dict[str, str]   # species name -> spec 2.1 category
 
     @model_validator(mode="after")
     def lists_are_consistent(self):
-        categories = self.insect_categories + self.wild_check_categories + list(self.species.values())
+        categories = (
+            self.insect_categories + self.wild_check_categories + self.always_review_categories
+            + list(self.species.values())
+        )
         unknown = set(categories) - set(self.animals)
         if unknown:
             raise ValueError(f"gate1 categories not in gate1.animals: {sorted(unknown)}")

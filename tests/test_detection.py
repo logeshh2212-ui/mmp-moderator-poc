@@ -41,8 +41,8 @@ def box(score, label="dog"):
     return Box(score, label, (10.0, 10.0, 50.0, 50.0))
 
 
-def gate1(siglip_values, det_max, species=(), is_video=False):
-    detections = [FrameDetections(det_max, "dog" if det_max else None, list(species))]
+def gate1(siglip_values, det_max, species=(), is_video=False, confidence=0.9):
+    detections = [FrameDetections(det_max, "dog" if det_max else None, list(species), confidence)]
     return run_gate1(row(**siglip_values)[None, :], LABELS, SCALE, is_video, detections)
 
 
@@ -230,3 +230,52 @@ def test_pipeline_logs_branches_and_timings(tmp_path, models, caplog):
     assert "siglip=100" in gate1_line
     for stage in ("validation", "safety", "prepare", "siglip", "detector+species", "gate1"):
         assert f"{stage}:" in result_line
+
+
+# --- hard-case fixes (gate1-fused-0.4) ----------------------------------------
+
+def test_unsure_species_does_not_lower_the_bar():
+    # BioCLIP said "tarantula" at 0.35 for a seascape: that must not bring in the insect bar.
+    result = gate1(SIGLIP_SURE, det_max=0.35, species=["tarantula"], confidence=0.35)
+
+    assert result.frames[0].insect is False
+    assert result.threshold == settings.gate1.thresholds.pass_photo
+    assert result.outcome == "borderline"  # 74 < 75
+
+
+def test_marine_mammal_always_goes_to_review():
+    # Dolphinarium with trainers: owner / domestic context, still never a pet (decided).
+    result = gate1({**SIGLIP_SURE, "domestic__": 0.4}, det_max=0.9, species=["dolphin"])
+
+    assert result.outcome == "pass"
+    assert result.wild is True
+
+
+def test_lookalike_boxes_never_count_as_animals():
+    figurine = Box(0.9, "ceramic figurine", (10.0, 10.0, 50.0, 50.0), animal=False)
+
+    [found] = detect_animals(pictures(), FakeDetector([figurine]), FakeSpecies("cat"))
+
+    assert found.det_max == 0.0
+    assert found.species == []
+    assert found.lookalike == "ceramic figurine (0.90)"
+
+
+def test_animal_next_to_a_lookalike_still_counts():
+    toy = Box(0.95, "plush toy", (0.0, 0.0, 30.0, 30.0), animal=False)
+    dog = Box(0.8, "dog", (30.0, 30.0, 60.0, 60.0))
+
+    [found] = detect_animals(pictures(), FakeDetector([toy, dog]), FakeSpecies("dog"))
+
+    assert found.det_max == 0.8  # a dog playing with a toy is still a dog
+    assert found.species == ["dog"]
+    assert found.species_confidence == 0.9
+
+
+def test_pipeline_rejects_a_figurine(tmp_path, models):
+    models(SIGLIP_SURE, [Box(0.9, "statue", (10.0, 10.0, 50.0, 50.0), animal=False)])
+
+    response = orchestrator.run_pipeline(make_ctx(tmp_path))
+
+    assert response.decision == "REJECTED"
+    assert response.rejection_code == "MOD_001"

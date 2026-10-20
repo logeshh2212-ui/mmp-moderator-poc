@@ -24,21 +24,27 @@ def detect_animals(pictures: list[Image.Image], detector, species_model=None) ->
     """Detector boxes per picture; the species model names the best few boxes."""
     cfg = settings.gate1.detector
     results = []
-    for img, boxes in zip(pictures, detector.detect(pictures)):
+    sure = settings.gate1.species_min_confidence
+    for img, all_boxes in zip(pictures, detector.detect(pictures)):
+        # Look-alike boxes (statue, plush toy...) never count as an animal.
+        boxes = [b for b in all_boxes if getattr(b, "animal", True)]
+        lookalike = next((b for b in all_boxes if not getattr(b, "animal", True)), None)
+        lookalike_text = f"{lookalike.label} ({lookalike.score:.2f})" if lookalike else None
         if not boxes:
-            results.append(FrameDetections(det_max=0.0, det_label=None))
+            results.append(FrameDetections(det_max=0.0, det_label=None, lookalike=lookalike_text))
             continue
         good = [b for b in boxes if b.score >= cfg.min_box_score][: cfg.max_species_boxes]
         names = [b.label for b in good]
+        confidences = [0.0] * len(good)  # 0 = the name came from the detector, not BioCLIP
         if good and species_model is not None:
             named = species_model.classify([_crop(img, b.xyxy) for b in good])
-            names = [
-                name if confidence >= settings.gate1.species_min_confidence else box.label
-                for box, (name, confidence) in zip(good, named)
-            ]
+            names = [name if conf >= sure else box.label for box, (name, conf) in zip(good, named)]
+            confidences = [conf if conf >= sure else 0.0 for _, conf in named]
         results.append(FrameDetections(
             det_max=boxes[0].score,
             det_label=boxes[0].label,
             species=list(dict.fromkeys(names)),
+            species_confidence=confidences[0] if confidences else 0.0,
+            lookalike=lookalike_text,
         ))
     return results

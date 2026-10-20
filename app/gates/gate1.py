@@ -16,6 +16,8 @@ class FrameDetections:
     det_max: float             # best animal-box score 0-1 (0 = no animal box at all)
     det_label: str | None      # the detector's name for that box, e.g. "snail"
     species: list[str] = field(default_factory=list)  # final species names, best box first
+    species_confidence: float = 0.0   # BioCLIP's probability for species[0] (0 = detector's name)
+    lookalike: str | None = None      # best non-animal box, e.g. "statue (0.62)", for the log
 
 
 @dataclass
@@ -33,6 +35,7 @@ class FrameVerdict:
     det_max: float | None = None   # detector's best box score (None = detector not used)
     det_label: str | None = None
     species: list[str] = field(default_factory=list)
+    lookalike: str | None = None
 
 
 @dataclass
@@ -121,8 +124,8 @@ def score_frames(
         name = animal_names[best_animal[i]]
         category = name.split("/")[0]
         det = detections[i] if detections is not None else None
-        if det is not None and det.species:
-            category = g.species[det.species[0]]  # the species model knows better than SigLIP
+        if det is not None and det.species and det.species_confidence >= g.species_category_min_confidence:
+            category = g.species[det.species[0]]  # a confident species model knows better than SigLIP
         pet = fuse(float(siglip[i]), det.det_max) if det is not None else float(siglip[i])
 
         insect = category in g.insect_categories
@@ -137,7 +140,8 @@ def score_frames(
             threshold=threshold,
             illustrated=bool(illustrated[i]),
             insect=insect,
-            wild=bool(wild[i]) and category in g.wild_check_categories,
+            wild=(bool(wild[i]) and category in g.wild_check_categories)
+            or category in g.always_review_categories,
             best_animal=name,
             best_no_pet=no_pet_names[best_no_pet[i]],
             animal_similarity=float(animal[i].max()),
@@ -146,6 +150,7 @@ def score_frames(
             det_max=det.det_max if det is not None else None,
             det_label=det.det_label if det is not None else None,
             species=list(det.species) if det is not None else [],
+            lookalike=det.lookalike if det is not None else None,
         ))
     return frames
 

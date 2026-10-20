@@ -5,7 +5,7 @@ limits:
   max_video_duration_seconds: 60
   duration_tolerance_seconds: 0.5
   min_image_side_pixels: 32
-  image_max_pixels: 89478485
+  image_max_pixels: 210000000   # 108 / 200 MP phone photos must pass (decided); still stops pixel bombs
 
 
 allowed_formats:
@@ -127,7 +127,7 @@ gate1:
   # Bump when the Gate 1 logic changes. model_version = this + model + revision + a
   # fingerprint of every decision-relevant setting, so editing a sentence or a threshold
   # automatically gives a new model_version (and a new cache key).
-  version: gate1-fused-0.3   # 0.3: SigLIP + OWLv2 detector + BioCLIP species, fused score
+  version: gate1-fused-0.4   # 0.4: look-alike queries, confident-species bar, marine always review
   # true = act on Gate 1 (MOD_001 rejections). false = shadow mode: compute and flag only,
   # decision stays HUMAN_REVIEW. The POC runs live; production can start in shadow mode.
   enforce: true
@@ -162,6 +162,7 @@ gate1:
     marine_mammals: ["a dolphin", "a whale"]
   insect_categories: [insects]                        # use pass_insect
   wild_check_categories: [exotic, marine_mammals]     # decided: no owner context -> HUMAN_REVIEW
+  always_review_categories: [marine_mammals]         # decided: never pets (spec 2.1) -> always HUMAN_REVIEW
   # Plain non-pet scenes only. Pet accessories (cage, tank, bowl, collar, bed, leash) are left
   # out on purpose: they appear IN most pet photos, and SigLIP cannot tell "an empty cage" from
   # "a cage with birds", which rejected real pets (budgies, goldfish, puppy + kitten).
@@ -187,12 +188,29 @@ gate1:
     score_full: 0.5         # box score that counts as 100
     min_box_score: 0.3      # boxes good enough to name a species
     max_species_boxes: 3    # spec 2.3: several animals -> several species
+    # Not animals, but animal-SHAPED (hard-case test 2026-10-21). OWLv2 also looks for these; a box
+    # whose best name is one of them does not count as an animal.
+    lookalikes:
+      - ceramic figurine
+      - statue
+      - sculpture
+      - stuffed toy
+      - plush toy
+      - person in an animal costume
+      - sticker
+      - fur coat
+      - printed pattern on fabric
+      - wooden driftwood
+      - paper cut-out
     video_frames: 8         # video: frames checked by the detector (incl. first / middle / last)
   # pet_score = detector_weight x detector score + siglip_weight x SigLIP score (calibrated later).
   fusion:
     detector_weight: 0.7
     siglip_weight: 0.3
   species_min_confidence: 0.3   # below this BioCLIP is unsure: use the detector's name instead
+  # BioCLIP must be at least this sure before its species changes the bar (insects 60) or the
+  # wild / marine rules; below it SigLIP's view of the picture decides the category.
+  species_category_min_confidence: 0.5
   # Names the detector looks for and BioCLIP chooses from -> the spec 2.1 category of each.
   # These names are what the API returns in species_detected.
   species:
@@ -203,10 +221,14 @@ gate1:
     lovebird: birds
     pigeon: birds
     chicken: birds
+    cockatiel: birds
+    hen: birds
     goldfish: fish
     betta fish: fish
     koi: fish
     guppy: fish
+    cichlid: fish
+    seahorse: fish
     turtle: other_aquatic
     frog: other_aquatic
     crab: other_aquatic
@@ -217,18 +239,24 @@ gate1:
     gecko: reptiles
     snake: reptiles
     chameleon: reptiles
+    iguana: reptiles
+    bearded dragon: reptiles
     rabbit: small_mammals
     hamster: small_mammals
     guinea pig: small_mammals
     mouse: small_mammals
     rat: small_mammals
+    ferret: small_mammals
+    squirrel: small_mammals
     cow: farm
     goat: farm
     sheep: farm
     horse: farm
     duck: farm
+    rooster: farm
     beetle: insects
     praying mantis: insects
+    stick insect: insects
     tarantula: insects
     scorpion: insects
     cockroach: insects

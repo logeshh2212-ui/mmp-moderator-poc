@@ -167,9 +167,11 @@ def log_gate1(ctx: ModerationContext) -> None:
     detector = "off" if top.det_max is None else f"{top.det_label or '-'} ({top.det_max:.2f})"
     gate1_logger.info(
         "content_id=%s pet_score=%d outcome=%s bar=%.0f kind=%s siglip=%.0f detector=%s "
-        "species=%s best_animal=%s (%.3f) best_no_pet=%s (%.3f) wild=%s frames=%d passed=%.0f%%",
+        "lookalike=%s species=%s best_animal=%s (%.3f) best_no_pet=%s (%.3f) wild=%s frames=%d "
+        "passed=%.0f%%",
         ctx.content_id, result.pet_score, result.outcome, top.threshold, kind, top.siglip_score,
-        detector, ",".join(result.species) or "-", top.best_animal, top.animal_similarity,
+        detector, top.lookalike or "-", ",".join(result.species) or "-", top.best_animal,
+        top.animal_similarity,
         top.best_no_pet, top.no_pet_similarity, result.wild, len(result.frames),
         result.pass_fraction * 100,
     )
