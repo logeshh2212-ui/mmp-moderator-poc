@@ -1,0 +1,9 @@
+[server]
+# Only reachable from this PC, not from the local network.
+address = "localhost"
+# Our video limit is 200 MiB; Streamlit's default upload limit is 200 MB.
+maxUploadSize = 250
+
+[browser]
+# Do not send usage statistics to Streamlit.
+gatherUsageStats = false

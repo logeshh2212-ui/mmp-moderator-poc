@@ -2,7 +2,9 @@
 
 Usage (from the project folder):
     uv run python -m scripts.inspect_file D:/samples/dog.jpg image
+    uv run python -m scripts.inspect_file D:/samples/dog.jpg image --json
 """
+import json
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -14,18 +16,23 @@ from app.validation.errors import ValidationFailure
 
 def main() -> None:
     path, content_type = Path(sys.argv[1]), sys.argv[2]
+    as_json = "--json" in sys.argv[3:]
 
     try:
-        result = run_checks(path, content_type)
+        data = asdict(run_checks(path, content_type))
     except ValidationFailure as failure:
-        print(f"REJECTED: {failure.flag}")
-        return
+        data = {"rejected": failure.flag}
 
-    data = asdict(result)
-    if data["video"]:
+    if data.get("video"):
         frame = data["video"]["first_frame_png"]
         data["video"]["first_frame_png"] = f"<{len(frame)} bytes of PNG>"
-    pprint(data, sort_dicts=False, width=100)
+
+    if as_json:
+        print(json.dumps(data, default=str))
+    elif "rejected" in data:
+        print(f"REJECTED: {data['rejected']}")
+    else:
+        pprint(data, sort_dicts=False, width=100)
 
 
 if __name__ == "__main__":

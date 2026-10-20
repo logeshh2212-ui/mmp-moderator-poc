@@ -13,3 +13,5 @@ wheels/
 data/
 __pycache__/
 .env
+# Generated test files (scripts/make_fixtures.py); iphone.heic may hold personal data
+tests/fixtures/
