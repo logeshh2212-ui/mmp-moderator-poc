@@ -36,6 +36,8 @@ class RedisSettings(BaseModel):
     url: str
     cache_ttl_seconds: int
     lock_ttl_seconds: int
+    lock_wait_seconds: float
+    lock_poll_seconds: float
 
 class IntakeSettings(BaseModel):
     chunk_size_bytes: int
