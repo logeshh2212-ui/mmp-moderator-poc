@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.main import app
 import shutil
 import subprocess
+from app.cache.blocklist import PhashBlocklist
 
 
 
@@ -21,6 +22,13 @@ def temp_dir(tmp_path, monkeypatch):
 def redis_server():
     """One in-memory Redis per test, shared by the async and sync clients."""
     return fakeredis.FakeServer()
+
+@pytest.fixture(autouse=True)
+def blocklist(redis_server, monkeypatch):
+    """Every test gets an empty in-memory blocklist instead of the real Redis."""
+    fake = PhashBlocklist(fakeredis.FakeRedis(server=redis_server, decode_responses=True))
+    monkeypatch.setattr("app.pipeline.orchestrator.get_blocklist", lambda: fake)
+    return fake
 
 
 @pytest.fixture

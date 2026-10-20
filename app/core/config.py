@@ -68,6 +68,10 @@ class SafetySettings(StrictModel):
     # Only "placeholder" exists today. A typo here stops the app at startup.
     csam_provider: Literal["placeholder"]
 
+class BlocklistSettings(StrictModel):
+    max_distance: int = Field(ge=0, le=7)
+    auto_block_codes: list[str]
+
 
 class AppSettings(StrictModel):
     limits: LimitsSettings
@@ -81,6 +85,8 @@ class AppSettings(StrictModel):
     metadata: MetadataSettings
     logging: LoggingSettings
     safety: SafetySettings
+    blocklist: BlocklistSettings
+
 
 
 class UniqueKeyLoader(yaml.SafeLoader):

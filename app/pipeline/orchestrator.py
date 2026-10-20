@@ -11,6 +11,9 @@ from app.validation.metadata import read_image_metadata, read_video_metadata
 from app.validation.result import ValidationResult
 from app.validation.video_check import check_video
 from app.validation.csam import get_csam_checker
+from app.cache.blocklist import get_blocklist
+from app.core.config import settings
+
 
 
 def run_checks(path: Path, content_type: str) -> ValidationResult:
@@ -54,6 +57,15 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
         ctx.reject("MOD_004", "quarantined", hard=True)
         return finish(ctx)
 
+        # Step 10b: a re-upload of a known-bad image gets the earlier decision.
+    phash = ctx.validation.phash
+    if phash:
+        ctx.blocklist_match = get_blocklist().find(phash)
+        if ctx.blocklist_match:
+            entry = ctx.blocklist_match.entry
+            ctx.reject(entry.rejection_code, "known_bad_image", hard=entry.hard_reject)
+            return finish(ctx)
+
     ctx.flags.append("validation_passed")
 
     # Later phases each add one call here, for example:
@@ -66,6 +78,20 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
 
 
 def finish(ctx: ModerationContext) -> ModerationResponse:
+    remember_if_bad(ctx)
     response = ctx.to_response()
     log_result(response)
     return response
+
+
+def remember_if_bad(ctx: ModerationContext) -> None:
+    """Add this image to the blocklist if its rejection code is one we block automatically."""
+    phash = ctx.validation.phash if ctx.validation else None
+    if (
+        ctx.decision == "REJECTED"
+        and phash
+        and ctx.blocklist_match is None  # already on the list
+        and ctx.rejection_code in settings.blocklist.auto_block_codes
+    ):
+        get_blocklist().add(phash, ctx.rejection_code, hard_reject=ctx.hard_reject, source="auto")
+

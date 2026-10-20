@@ -6,6 +6,9 @@ from uuid import UUID
 from app.api.schemas import Decision, DimensionScores, ModerationResponse
 from app.core.config import settings
 from app.validation.result import ValidationResult
+from app.validation.csam import CsamResult
+from app.cache.blocklist import BlocklistMatch
+
 
 
 @dataclass
@@ -26,6 +29,12 @@ class ModerationContext:
 
     # Steps 5-8: validation
     validation: ValidationResult | None = None
+        # Step 8b: CSAM hash check
+    csam: CsamResult | None = None
+
+        # Step 10b: pHash blocklist
+    blocklist_match: BlocklistMatch | None = None
+
 
     # Filled in by later phases (Gate 1, Gate 2, scoring, AI label)
     pet_score: float | None = None

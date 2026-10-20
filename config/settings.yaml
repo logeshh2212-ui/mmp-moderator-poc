@@ -68,6 +68,13 @@ redis:
 
 safety:
   csam_provider: placeholder
+  
+blocklist:
+  # 8 bands of 8 bits: any hash within 7 bits shares at least one band, so 7 is the maximum.
+  max_distance: 6
+  # Rejections with these codes are added automatically. MOD_008 (bad file) never belongs here.
+  auto_block_codes:
+    - MOD_004
 
 
 
