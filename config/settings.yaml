@@ -25,12 +25,6 @@ timeouts:
 
 temp_dir: 'D:\mmp-moderator-poc\data\tmp'
 
-redis:
-  url: redis://127.0.0.1:6379/0
-  cache_ttl_seconds: 2592000
-  lock_ttl_seconds: 60
-  lock_wait_seconds: 5
-  lock_poll_seconds: 0.2
 
 
 model_version: validation-0.1
