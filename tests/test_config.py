@@ -77,3 +77,27 @@ def test_device_can_be_switched_by_environment(monkeypatch):
 
     assert (loaded.ml.device, loaded.ml.dtype) == ("cuda", "float16")
 
+
+
+def test_detector_must_be_a_listed_model(tmp_path):
+    text = real_settings().replace("detector: owlv2 ", "detector: yolo99 ")
+
+    with pytest.raises(ValidationError) as exc:
+        load_settings(write_settings(tmp_path, text))
+    assert "yolo99" in str(exc.value)
+
+
+def test_species_must_map_to_a_known_category(tmp_path):
+    text = real_settings().replace("    dolphin: marine_mammals", "    dolphin: sea_creatures")
+
+    with pytest.raises(ValidationError) as exc:
+        load_settings(write_settings(tmp_path, text))
+    assert "sea_creatures" in str(exc.value)
+
+
+def test_fusion_weights_must_add_up(tmp_path):
+    text = real_settings().replace("siglip_weight: 0.3", "siglip_weight: 0.5")
+
+    with pytest.raises(ValidationError) as exc:
+        load_settings(write_settings(tmp_path, text))
+    assert "add up to 1" in str(exc.value)

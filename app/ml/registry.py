@@ -57,15 +57,38 @@ def load_models() -> None:
 
     configure_torch()
     if settings.ml.backbone:
+        from app.gates.gate1 import gate1_prompts
         from app.ml.siglip import SiglipEmbedder
 
-        registry.register(SiglipEmbedder(settings.ml.backbone))
+        registry.register(SiglipEmbedder(settings.ml.backbone, prompts=gate1_prompts()))
+    species = list(settings.gate1.species)
+    if settings.ml.detector:
+        from app.ml.owlv2 import Owlv2Detector
+
+        registry.register(Owlv2Detector(settings.ml.detector, labels=species))
+    if settings.ml.species_model:
+        from app.ml.bioclip import BioclipClassifier
+
+        registry.register(BioclipClassifier(settings.ml.species_model, species=species))
     registry.load_all()
+
+
+def _ready(name: str | None):
+    if name and registry.status.get(name) == "ready":
+        return registry.get(name)
+    return None
 
 
 def get_backbone():
     """The loaded SigLIP 2 model, or None if none is configured or it failed to load."""
-    name = settings.ml.backbone
-    if name and registry.status.get(name) == "ready":
-        return registry.get(name)
-    return None
+    return _ready(settings.ml.backbone)
+
+
+def get_detector():
+    """The loaded animal detector (OWLv2), or None."""
+    return _ready(settings.ml.detector)
+
+
+def get_species_model():
+    """The loaded species model (BioCLIP 2), or None."""
+    return _ready(settings.ml.species_model)

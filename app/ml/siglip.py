@@ -88,3 +88,8 @@ class SiglipEmbedder:
         logits = torch.from_numpy(image_embeds) @ self.text_embeds.T * self.scale + self.bias
         probs = torch.sigmoid(logits)
         return {label: probs[:, i].tolist() for i, label in enumerate(self.labels)}
+    
+    def similarities(self, image_embeds: np.ndarray) -> np.ndarray:
+        """Cosine similarity of each picture to each prompt, shape (pictures, prompts)."""
+        return (torch.from_numpy(image_embeds) @ self.text_embeds.T).numpy()
+

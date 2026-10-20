@@ -9,6 +9,7 @@ from redis.exceptions import RedisError
 from app.api.schemas import ContentContext, ContentType, ModerationResponse
 from app.cache.idempotency import IdempotencyStore, UploadKey, get_idempotency_store
 from app.core.logging import log_problem, log_result
+from app.core.versioning import current_model_version
 from app.pipeline.context import ModerationContext
 from app.pipeline.orchestrator import finish, run_pipeline
 from app.validation.errors import ProcessingTimeout, ValidationFailure
@@ -49,7 +50,7 @@ async def moderate_content(
     ctx.path = intake.path
     ctx.size_bytes = intake.size_bytes
     ctx.sha256 = intake.sha256
-    key = UploadKey(intake.sha256, user_id, content_type, context)
+    key = UploadKey(intake.sha256, user_id, content_type, context, current_model_version())
 
     try:
         cached = await store.get_cached(key)

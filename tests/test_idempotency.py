@@ -10,7 +10,7 @@ from app.cache.idempotency import make_redis
 
 SHA = "a" * 64
 USER = uuid4()
-KEY = UploadKey(SHA, USER, "image", "post")
+KEY = UploadKey(SHA, USER, "image", "post", "mv-test")
 
 
 def make_response() -> ModerationResponse:
@@ -43,7 +43,7 @@ def test_other_user_does_not_hit_cache():
         store = new_store()
         await store.store(KEY, make_response())
 
-        assert await store.get_cached(UploadKey(SHA, uuid4(), "image", "post")) is None
+        assert await store.get_cached(UploadKey(SHA, uuid4(), "image", "post", "mv-test")) is None
 
     asyncio.run(scenario())
 
@@ -108,7 +108,7 @@ def test_other_content_type_does_not_hit_cache():
         store = new_store()
         await store.store(KEY, make_response())
 
-        assert await store.get_cached(UploadKey(SHA, USER, "video", "post")) is None
+        assert await store.get_cached(UploadKey(SHA, USER, "video", "post", "mv-test")) is None
 
     asyncio.run(scenario())
 
@@ -118,7 +118,7 @@ def test_other_context_does_not_hit_cache():
         store = new_store()
         await store.store(KEY, make_response())
 
-        assert await store.get_cached(UploadKey(SHA, USER, "image", "breeding")) is None
+        assert await store.get_cached(UploadKey(SHA, USER, "image", "breeding", "mv-test")) is None
 
     asyncio.run(scenario())
 

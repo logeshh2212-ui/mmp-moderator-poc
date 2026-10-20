@@ -16,9 +16,12 @@ class UploadKey:
     user_id: UUID | str
     content_type: str
     context: str
+    model_version: str  # new models or rules must not reuse answers made by older ones
 
     def suffix(self) -> str:
-        return f"{self.sha256}:{self.user_id}:{self.content_type}:{self.context}"
+        return (
+            f"{self.sha256}:{self.user_id}:{self.content_type}:{self.context}:{self.model_version}"
+        )
 
 
 def result_key(key: UploadKey) -> str:

@@ -12,6 +12,7 @@ dependencies = [
     "filetype>=1.2.0",
     "huggingface-hub>=2.2.0",
     "imagehash>=4.3.2",
+    "open-clip-torch==3.3.0",
     "pillow>=13.0.0",
     "pillow-heif>=1.8.1",
     "pydantic>=2.14.1",

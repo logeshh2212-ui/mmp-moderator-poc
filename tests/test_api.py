@@ -14,6 +14,7 @@ from app.cache.idempotency import (
     result_key,
 )
 from app.core.config import settings
+from app.core.versioning import current_model_version
 from app.main import app
 from app.pipeline.orchestrator import run_checks
 from app.validation.metadata import MediaMetadata
@@ -63,7 +64,8 @@ def test_valid_request_shape(client):
     assert body["pet_score"] is None
     assert body["dimension_scores"] is None
     assert body["species_detected"] == []
-    assert body["model_version"] == "validation-0.1"
+    assert body["model_version"] == current_model_version()
+    assert body["model_version"].startswith("validation-0.1+gate1-")
 
 def test_too_large_image_rejected(client, temp_dir):
     big = b"\0" * (settings.limits.image_max_bytes + 1)  # just over 20 MiB
@@ -101,7 +103,9 @@ def post_image(client, user_id=VALID_USER):
 
 
 FILE_SHA = hashlib.sha256(FILE["file"][1]).hexdigest()
-FILE_KEY = UploadKey(FILE_SHA, VALID_USER, "image", "post")
+def file_key() -> UploadKey:
+    """Built inside each test, because model_version depends on the (patched) settings."""
+    return UploadKey(FILE_SHA, VALID_USER, "image", "post", current_model_version())
 
 
 def test_same_file_twice_returns_same_response(client):
@@ -122,14 +126,14 @@ def test_lock_released_after_request(client, sync_redis):
     post_image(client)
 
 
-    assert sync_redis.exists(lock_key(FILE_KEY)) == 0
-    assert sync_redis.exists(result_key(FILE_KEY)) == 1
+    assert sync_redis.exists(lock_key(file_key())) == 0
+    assert sync_redis.exists(result_key(file_key())) == 1
 
 
 def test_locked_upload_returns_409(client, sync_redis, temp_dir, monkeypatch):
     monkeypatch.setattr(settings.redis, "lock_poll_seconds", 0.01)
     monkeypatch.setattr(settings.redis, "lock_wait_seconds", 0.05)
-    sync_redis.set(lock_key(FILE_KEY), "1", ex=60)
+    sync_redis.set(lock_key(file_key()), "1", ex=60)
 
     r = post_image(client)
 
@@ -156,8 +160,8 @@ def test_errors_are_not_cached_and_lock_is_released(client, sync_redis, monkeypa
     with pytest.raises(RuntimeError):
         post_image(client)
 
-    assert sync_redis.exists(result_key(FILE_KEY)) == 0
-    assert sync_redis.exists(lock_key(FILE_KEY)) == 0
+    assert sync_redis.exists(result_key(file_key())) == 0
+    assert sync_redis.exists(lock_key(file_key())) == 0
 
 def make_jpeg(size=(64, 64)) -> bytes:
     buffer = io.BytesIO()

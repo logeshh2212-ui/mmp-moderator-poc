@@ -15,18 +15,25 @@ def setup_logging() -> None:
     )
 
 
-def log_result(response: ModerationResponse, *, cached: bool = False) -> None:
-    """One line per moderated request: id, decision, reason, time."""
+def log_result(
+    response: ModerationResponse,
+    *,
+    cached: bool = False,
+    timings: dict[str, int] | None = None,
+) -> None:
+    """One line per moderated request: id, decision, reason, time (and time per stage)."""
     reason = "-"
     if response.rejection_code:
         reason = f"{response.rejection_code}:{','.join(response.flags)}"
+    stages = ",".join(f"{stage}:{ms}" for stage, ms in (timings or {}).items()) or "-"
     logger.info(
-        "content_id=%s decision=%s reason=%s ms=%d cached=%s",
+        "content_id=%s decision=%s reason=%s ms=%d cached=%s timings_ms=%s",
         response.content_id,
         response.decision,
         reason,
         response.processing_ms,
         cached,
+        stages,
     )
 
 

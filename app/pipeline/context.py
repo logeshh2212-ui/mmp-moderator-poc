@@ -6,11 +6,12 @@ from uuid import UUID
 import numpy as np
 
 from app.api.schemas import Decision, DimensionScores, ModerationResponse
-from app.core.config import settings
+from app.core.versioning import current_model_version
 from app.validation.result import ValidationResult
 from app.validation.csam import CsamResult
 from app.cache.blocklist import BlocklistMatch
 from app.prepare.media import PreparedMedia
+from app.gates.gate1 import Gate1Result
 
 
 
@@ -44,6 +45,12 @@ class ModerationContext:
     # Step 16: SigLIP 2, one embedding per image / frame (reused by Gate 1 and Gate 2)
     embeddings: np.ndarray | None = None
     prompt_probs: dict[str, list[float]] | None = None
+
+    # Step 17: Gate 1
+    gate1: Gate1Result | None = None
+
+    # Milliseconds per pipeline stage, logged on every request (speed work comes later)
+    timings: dict[str, int] = field(default_factory=dict)
 
     # Filled in by later phases (Gate 1, Gate 2, scoring, AI label)
     pet_score: float | None = None
@@ -79,5 +86,5 @@ class ModerationContext:
             flags=list(self.flags),
             species_detected=list(self.species_detected),
             processing_ms=int((perf_counter() - self.started_at) * 1000),
-            model_version=settings.model_version,
+            model_version=current_model_version(),
         )

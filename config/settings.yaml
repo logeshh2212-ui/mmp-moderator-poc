@@ -94,6 +94,8 @@ ml:
   num_threads: 4     # i5-10210U has 4 cores
   warmup: true       # run one tiny picture through each model at startup
   backbone: siglip2_base   # which SigLIP 2 the server loads; null = none
+  detector: owlv2          # Gate 1 animal detector (finds WHERE an animal is); null = off
+  species_model: bioclip2  # names the species in each animal box; null = off
   batch_size: 16           # video frames per SigLIP pass
   models:
     siglip2_base:
@@ -104,6 +106,14 @@ ml:
       repo: google/siglip2-so400m-patch16-384
       revision: dd658faac399427308559e2c3ac1e99cbe43845d
       licence: Apache-2.0
+    owlv2:
+      repo: google/owlv2-base-patch16-ensemble
+      revision: cfd3195ba4ea9592eec887ded089f4c08eff231d
+      licence: Apache-2.0
+    bioclip2:
+      repo: imageomics/bioclip-2
+      revision: 2957b322090f9cb17ae72c71981c7218a28d81e0
+      licence: MIT
   # Step 16 sanity sentences. Step 17 replaces them with the Gate 1 set.
   # They are embedded once at startup; the text half of the model is then deleted.
   prompts:
@@ -112,6 +122,122 @@ ml:
     dog: "a photo of a dog"
     food: "a photo of food"
     no_animal: "a photo with no animal in it"
+
+gate1:
+  # Bump when the Gate 1 logic changes. model_version = this + model + revision + a
+  # fingerprint of every decision-relevant setting, so editing a sentence or a threshold
+  # automatically gives a new model_version (and a new cache key).
+  version: gate1-fused-0.3   # 0.3: SigLIP + OWLv2 detector + BioCLIP species, fused score
+  # true = act on Gate 1 (MOD_001 rejections). false = shadow mode: compute and flag only,
+  # decision stays HUMAN_REVIEW. The POC runs live; production can start in shadow mode.
+  enforce: true
+  # POC only: Gate 2 does not exist yet, so a Gate 1 pass is APPROVED.
+  # Set to false once Gate 2 is built (then a pass goes on to the safety checks).
+  approve_on_pass: true
+  thresholds:
+    pass_photo: 75          # spec 2.2
+    pass_illustrated: 60    # spec 2.3: drawings / cartoons
+    pass_insect: 60         # spec 2.1: "lower threshold" (decided: 60)
+    fail_below: 50          # below this: MOD_001
+  video_min_pass_fraction: 0.30   # spec 6.1: pet in at least 30% of sampled frames
+  score_scale: 1.0                # sharpness of the score; tuned in the evaluation step
+  # "{}" is replaced by each animal / no-pet idea; several wordings are averaged.
+  templates:
+    - "a photo of {}."
+    - "a blurry photo of {}."
+    - "a dark photo of {}."
+    - "a close-up photo of {}."
+  # Spec 2.1 categories. "Pest" pets (spec 7) are included on purpose.
+  animals:
+    dogs: ["a dog", "a puppy", "a stray dog"]
+    cats: ["a cat", "a kitten", "a persian cat"]
+    birds: ["a parrot", "a budgie", "a lovebird", "a pigeon", "a hen", "a bird in a cage"]
+    fish: ["a goldfish", "a betta fish", "a koi fish", "fish in an aquarium", "small fish in a fish tank"]
+    other_aquatic: ["a turtle", "a frog", "a crab", "a shrimp", "a snail", "an axolotl"]
+    reptiles: ["a lizard", "a gecko", "a snake", "a chameleon", "an iguana"]
+    small_mammals: ["a rabbit", "a hamster", "a guinea pig", "a ferret", "a mouse", "a rat", "a small animal held in a person's hands"]
+    farm: ["a cow", "a goat", "a sheep", "a horse", "a duck", "a rooster"]
+    insects: ["a beetle", "a praying mantis", "a stick insect", "a tarantula", "a scorpion", "a cockroach", "an insect"]
+    exotic: ["a deer", "a peacock", "a monkey"]
+    marine_mammals: ["a dolphin", "a whale"]
+  insect_categories: [insects]                        # use pass_insect
+  wild_check_categories: [exotic, marine_mammals]     # decided: no owner context -> HUMAN_REVIEW
+  # Plain non-pet scenes only. Pet accessories (cage, tank, bowl, collar, bed, leash) are left
+  # out on purpose: they appear IN most pet photos, and SigLIP cannot tell "an empty cage" from
+  # "a cage with birds", which rejected real pets (budgies, goldfish, puppy + kitten).
+  # Accessory-only photos (spec 2.3) are left to the trained Gate 1 classifier (next step).
+  no_pet:
+    - "a person"
+    - "a room interior"
+    - "a landscape"
+    - "food on a plate"
+    - "a car"
+    - "a building"
+    - "furniture"
+    - "a screenshot of text"
+  # Full sentences (no template): which threshold applies, and wild context.
+  photo: ["a photograph.", "a real photo taken with a phone camera."]
+  illustration: ["a cartoon drawing.", "a digital illustration.", "a painting.", "a 3D render.", "anime artwork.", "a pencil sketch."]
+  wild: ["a wild animal in nature.", "an animal swimming in the open ocean.", "a wild animal in a forest.", "wildlife photography."]
+  domestic: ["a pet at home.", "an animal with its owner.", "an animal inside a house.", "an animal in a zoo, sanctuary or rescue centre."]
+  # Detector (OWLv2): its best animal-box score becomes 0-100 between these two values.
+  # Tested on 30 photos: real animals 0.55-0.96, accessory-only photos 0.00-0.19.
+  detector:
+    score_floor: 0.1        # box score that counts as 0
+    score_full: 0.5         # box score that counts as 100
+    min_box_score: 0.3      # boxes good enough to name a species
+    max_species_boxes: 3    # spec 2.3: several animals -> several species
+    video_frames: 8         # video: frames checked by the detector (incl. first / middle / last)
+  # pet_score = detector_weight x detector score + siglip_weight x SigLIP score (calibrated later).
+  fusion:
+    detector_weight: 0.7
+    siglip_weight: 0.3
+  species_min_confidence: 0.3   # below this BioCLIP is unsure: use the detector's name instead
+  # Names the detector looks for and BioCLIP chooses from -> the spec 2.1 category of each.
+  # These names are what the API returns in species_detected.
+  species:
+    dog: dogs
+    cat: cats
+    parrot: birds
+    budgerigar: birds
+    lovebird: birds
+    pigeon: birds
+    chicken: birds
+    goldfish: fish
+    betta fish: fish
+    koi: fish
+    guppy: fish
+    turtle: other_aquatic
+    frog: other_aquatic
+    crab: other_aquatic
+    shrimp: other_aquatic
+    snail: other_aquatic
+    axolotl: other_aquatic
+    lizard: reptiles
+    gecko: reptiles
+    snake: reptiles
+    chameleon: reptiles
+    rabbit: small_mammals
+    hamster: small_mammals
+    guinea pig: small_mammals
+    mouse: small_mammals
+    rat: small_mammals
+    cow: farm
+    goat: farm
+    sheep: farm
+    horse: farm
+    duck: farm
+    beetle: insects
+    praying mantis: insects
+    tarantula: insects
+    scorpion: insects
+    cockroach: insects
+    butterfly: insects
+    deer: exotic
+    peacock: exotic
+    monkey: exotic
+    dolphin: marine_mammals
+    whale: marine_mammals
 
 targets:   # spec MMP-MOD-2026-001, non-functional requirements
   image_p95_seconds: 3

@@ -15,6 +15,8 @@ def no_real_models(monkeypatch):
     from app.ml.registry import registry
 
     monkeypatch.setattr(settings.ml, "backbone", None)
+    monkeypatch.setattr(settings.ml, "detector", None)
+    monkeypatch.setattr(settings.ml, "species_model", None)
     yield
     registry.clear()
 

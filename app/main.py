@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.core.config import settings
+from app.core.versioning import current_model_version
 from app.core.logging import setup_logging
 from app.validation.csam import get_csam_checker
 
@@ -38,5 +39,7 @@ def health_check():
         "status": "ok",
         "device": settings.ml.device,
         "models": dict(registry.status),
+        "model_version": current_model_version(),
+        "gate1_enforce": settings.gate1.enforce,
     }
 
