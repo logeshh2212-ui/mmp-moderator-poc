@@ -1,4 +1,3 @@
-from pathlib import Path
 from time import perf_counter
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -8,65 +7,14 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.api.schemas import ContentContext, ContentType, ModerationResponse
 from app.cache.idempotency import IdempotencyStore, UploadKey, get_idempotency_store
-from app.core.config import settings
+from app.core.logging import log_problem, log_result
+from app.pipeline.context import ModerationContext
+from app.pipeline.orchestrator import finish, run_pipeline
 from app.validation.errors import ProcessingTimeout, ValidationFailure
-from app.validation.formats import check_format
-from app.validation.hashing import phash_image, phash_png_bytes
-from app.validation.image_check import check_image
 from app.validation.intake import remove_temp_file, save_upload
-from app.validation.metadata import read_image_metadata, read_video_metadata
-from app.validation.result import ValidationResult
-from app.validation.video_check import check_video
-
-
 
 
 router = APIRouter()
-
-
-def run_checks(path: Path, content_type: str) -> ValidationResult:
-    """Run every validation check. Raise ValidationFailure to reject."""
-    file_format = check_format(path, content_type)
-
-    if content_type == "image":
-        image = check_image(path)
-        return ValidationResult(
-            file_format=file_format,
-            image=image,
-            metadata=read_image_metadata(path),
-            phash=phash_image(path, image.orientation),
-        )
-
-    video = check_video(path, file_format)
-    return ValidationResult(
-        file_format=file_format,
-        video=video,
-        metadata=read_video_metadata(video.tags),
-        phash=phash_png_bytes(video.first_frame_png),
-    )
-
-
-
-
-def build_response(
-    content_id: UUID,
-    start: float,
-    failure: ValidationFailure | None = None,
-) -> ModerationResponse:
-    if failure is None:
-        decision, rejection_code, flags = "HUMAN_REVIEW", None, ["validation_not_implemented"]
-    else:
-        decision, rejection_code, flags = "REJECTED", "MOD_008", [failure.flag]
-
-    return ModerationResponse(
-        content_id=content_id,
-        decision=decision,
-        hard_reject=False,
-        rejection_code=rejection_code,
-        flags=flags,
-        processing_ms=int((perf_counter() - start) * 1000),
-        model_version=settings.model_version,
-    )
 
 
 @router.post(
@@ -80,42 +28,40 @@ async def moderate_content(
     store: Annotated[IdempotencyStore, Depends(get_idempotency_store)],
     context: Annotated[ContentContext, Form()] = "post",
 ) -> ModerationResponse:
-    start = perf_counter()
-    content_id = uuid4()
+    ctx = ModerationContext(
+        content_id=uuid4(),
+        user_id=user_id,
+        content_type=content_type,
+        context=context,
+        started_at=perf_counter(),
+    )
 
-
+    # Step 4 runs here, not in the orchestrator: it needs the upload stream, and
+    # its SHA-256 is the idempotency key we must check before any heavy work.
     try:
-        intake = await save_upload(file, content_type, content_id)
+        intake = await save_upload(file, content_type, ctx.content_id)
     except ValidationFailure as failure:
         # We stopped reading, so there is no full hash: this answer is not cached.
-        return build_response(content_id, start, failure)
+        ctx.reject("MOD_008", failure.flag)
+        return finish(ctx)
 
-    try:
-        validation = await run_in_threadpool(run_checks, intake.path, content_type)
-        _ = validation  # Step 9 (orchestrator) puts this into the context object
-
-        response = build_response(content_id, start)
-    except ValidationFailure as failure:
-        response = build_response(content_id, start, failure)
-    except ProcessingTimeout:
-        # Not a decision: skip storing, release the lock, let the caller retry.
-        raise HTTPException(
-                status_code=503,
-                detail="Processing timed out. Try again shortly.",
-            )
-
-
+    ctx.path = intake.path
+    ctx.size_bytes = intake.size_bytes
+    ctx.sha256 = intake.sha256
     key = UploadKey(intake.sha256, user_id, content_type, context)
 
     try:
         cached = await store.get_cached(key)
         if cached is not None:
+            log_result(cached, cached=True)
             return cached
 
         if not await store.lock(key):
             cached = await store.wait_for_result(key)
             if cached is not None:
+                log_result(cached, cached=True)
                 return cached
+            log_problem(409, ctx.content_id, "same upload is already being processed")
             raise HTTPException(
                 status_code=409,
                 detail="This upload is already being processed. Try again shortly.",
@@ -123,10 +69,14 @@ async def moderate_content(
 
         try:
             try:
-                await run_in_threadpool(run_checks, intake.path, content_type)
-                response = build_response(content_id, start)
-            except ValidationFailure as failure:
-                response = build_response(content_id, start, failure)
+                response = await run_in_threadpool(run_pipeline, ctx)
+            except ProcessingTimeout as exc:
+                # Not a decision: skip storing, release the lock, let the caller retry.
+                log_problem(503, ctx.content_id, str(exc))
+                raise HTTPException(
+                    status_code=503,
+                    detail="Processing timed out. Try again shortly.",
+                )
 
             # Only final decisions reach this line; errors skip it.
             await store.store(key, response)
@@ -135,5 +85,3 @@ async def moderate_content(
             await store.release(key)
     finally:
         remove_temp_file(intake.path)
-
-

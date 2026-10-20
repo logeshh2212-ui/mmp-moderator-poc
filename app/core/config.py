@@ -49,6 +49,9 @@ class ToolsSettings(BaseModel):
     ffmpeg: str
 class MetadataSettings(BaseModel):
     ai_generator_keywords: list[str]
+class LoggingSettings(BaseModel):
+    level: str
+
 
 class AppSettings(BaseModel):
     limits: LimitsSettings
@@ -60,6 +63,7 @@ class AppSettings(BaseModel):
     intake:IntakeSettings
     tools: ToolsSettings
     metadata: MetadataSettings
+    logging:LoggingSettings
 
 
 

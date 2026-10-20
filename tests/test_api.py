@@ -1,12 +1,12 @@
 import hashlib
 import io
-
+import logging
 import pytest
 from PIL import Image
 
 from app.cache.idempotency import UploadKey, lock_key, result_key
 from app.core.config import settings
-from app.api.routes import run_checks
+from app.pipeline.orchestrator import run_checks
 from app.validation.metadata import MediaMetadata
 
 
@@ -136,7 +136,8 @@ def test_errors_are_not_cached_and_lock_is_released(client, sync_redis, monkeypa
     def crash(path, content_type):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("app.api.routes.run_checks", crash)
+    monkeypatch.setattr("app.pipeline.orchestrator.run_checks", crash)
+
 
     with pytest.raises(RuntimeError):
         post_image(client)
@@ -288,3 +289,41 @@ def test_valid_video_has_metadata_and_hash(videos, name):
     assert result.video is not None
     assert isinstance(result.metadata, MediaMetadata)
     assert len(result.phash) == 16
+
+
+
+def test_valid_upload_says_validation_passed(client):
+    body = post_image(client).json()
+
+    assert body["decision"] == "HUMAN_REVIEW"
+    assert body["flags"] == ["validation_passed"]
+
+
+def test_checks_run_once_and_duplicate_comes_from_cache(client, monkeypatch, caplog):
+    import app.pipeline.orchestrator as orchestrator
+
+    calls = []
+    real_run_checks = orchestrator.run_checks
+
+    def counting(path, content_type):
+        calls.append(path)
+        return real_run_checks(path, content_type)
+
+    monkeypatch.setattr(orchestrator, "run_checks", counting)
+
+    with caplog.at_level(logging.INFO, logger="mmp.moderation"):
+        post_image(client)
+        post_image(client)
+
+    assert len(calls) == 1  # second request never re-validated
+    lines = [r.getMessage() for r in caplog.records if r.name == "mmp.moderation"]
+    assert "cached=False" in lines[0]
+    assert "cached=True" in lines[1]
+
+
+def test_timeout_leaves_no_temp_file(client, videos, temp_dir, monkeypatch):
+    monkeypatch.setattr(settings.timeouts, "ffprobe_seconds", 0.001)
+
+    assert post_video(client, videos["mp4"]).status_code == 503
+    assert list(temp_dir.iterdir()) == []
+

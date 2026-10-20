@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from pprint import pprint
 
-from app.api.routes import run_checks
+from app.pipeline.orchestrator import run_checks
 from app.validation.errors import ValidationFailure
 
 
