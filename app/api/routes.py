@@ -6,10 +6,12 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.api.schemas import ContentContext, ContentType, ModerationResponse
-from app.cache.idempotency import IdempotencyStore, get_idempotency_store
 from app.core.config import settings
 from app.validation.errors import ValidationFailure
 from app.validation.intake import remove_temp_file, save_upload
+from app.validation.formats import check_format
+from app.cache.idempotency import IdempotencyStore, UploadKey, get_idempotency_store
+
 
 
 router = APIRouter()
@@ -17,7 +19,7 @@ router = APIRouter()
 
 def run_checks(path: Path, content_type: str) -> None:
     """Steps 5-8 add their checks here. Raise ValidationFailure to reject."""
-
+    check_format(path, content_type)
 
 def build_response(
     content_id: UUID,
@@ -54,8 +56,6 @@ async def moderate_content(
     start = perf_counter()
     content_id = uuid4()
 
-    # context is used by the gates in later phases.
-    _ = context
 
     try:
         intake = await save_upload(file, content_type, content_id)
@@ -63,13 +63,15 @@ async def moderate_content(
         # We stopped reading, so there is no full hash: this answer is not cached.
         return build_response(content_id, start, failure)
 
+    key = UploadKey(intake.sha256, user_id, content_type, context)
+
     try:
-        cached = await store.get_cached(intake.sha256, user_id)
+        cached = await store.get_cached(key)
         if cached is not None:
             return cached
 
-        if not await store.lock(intake.sha256, user_id):
-            cached = await store.wait_for_result(intake.sha256, user_id)
+        if not await store.lock(key):
+            cached = await store.wait_for_result(key)
             if cached is not None:
                 return cached
             raise HTTPException(
@@ -85,9 +87,11 @@ async def moderate_content(
                 response = build_response(content_id, start, failure)
 
             # Only final decisions reach this line; errors skip it.
-            await store.store(intake.sha256, user_id, response)
+            await store.store(key, response)
             return response
         finally:
-            await store.release(intake.sha256, user_id)
+            await store.release(key)
     finally:
         remove_temp_file(intake.path)
+
+

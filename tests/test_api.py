@@ -1,13 +1,21 @@
-from app.core.config import settings
 import hashlib
+import io
 
 import pytest
+from PIL import Image
 
-from app.cache.idempotency import lock_key, result_key
+from app.cache.idempotency import UploadKey, lock_key, result_key
+from app.core.config import settings
+
+
+def make_jpeg(size=(64, 64)) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", size, "orange").save(buffer, "JPEG")
+    return buffer.getvalue()
+
 
 VALID_USER = "3f2b8c1e-0000-4000-8000-000000000001"
-FILE = {"file": ("x.jpg", b"fake", "image/jpeg")}
-
+FILE = {"file": ("x.jpg", make_jpeg(), "image/jpeg")}
 
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
@@ -77,6 +85,7 @@ def post_image(client, user_id=VALID_USER):
 
 
 FILE_SHA = hashlib.sha256(FILE["file"][1]).hexdigest()
+FILE_KEY = UploadKey(FILE_SHA, VALID_USER, "image", "post")
 
 
 def test_same_file_twice_returns_same_response(client):
@@ -95,15 +104,16 @@ def test_same_file_other_user_is_processed_separately(client):
 
 def test_lock_released_after_request(client, sync_redis):
     post_image(client)
+    
 
-    assert sync_redis.exists(lock_key(FILE_SHA, VALID_USER)) == 0
-    assert sync_redis.exists(result_key(FILE_SHA, VALID_USER)) == 1
+    assert sync_redis.exists(lock_key(FILE_KEY)) == 0
+    assert sync_redis.exists(result_key(FILE_KEY)) == 1
 
 
 def test_locked_upload_returns_409(client, sync_redis, temp_dir, monkeypatch):
     monkeypatch.setattr(settings.redis, "lock_poll_seconds", 0.01)
     monkeypatch.setattr(settings.redis, "lock_wait_seconds", 0.05)
-    sync_redis.set(lock_key(FILE_SHA, VALID_USER), "1", ex=60)
+    sync_redis.set(lock_key(FILE_KEY), "1", ex=60)
 
     r = post_image(client)
 
@@ -129,7 +139,71 @@ def test_errors_are_not_cached_and_lock_is_released(client, sync_redis, monkeypa
     with pytest.raises(RuntimeError):
         post_image(client)
 
-    assert sync_redis.exists(result_key(FILE_SHA, VALID_USER)) == 0
-    assert sync_redis.exists(lock_key(FILE_SHA, VALID_USER)) == 0
+    assert sync_redis.exists(result_key(FILE_KEY)) == 0
+    assert sync_redis.exists(lock_key(FILE_KEY)) == 0
 
+def make_jpeg(size=(64, 64)) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", size, "orange").save(buffer, "JPEG")
+    return buffer.getvalue()
+
+
+
+def test_exe_renamed_to_jpg_rejected(client, temp_dir):
+    exe = b"MZ\x90\x00" + b"\x00" * 60
+    r = client.post("/api/v1/moderate",
+                    files={"file": ("fake.jpg", exe, "image/jpeg")},
+                    data={"content_type": "image", "user_id": VALID_USER})
+
+    body = r.json()
+    assert body["decision"] == "REJECTED"
+    assert body["rejection_code"] == "MOD_008"
+    assert body["flags"] == ["unsupported_format"]
+    assert list(temp_dir.iterdir()) == []
+
+
+def test_mp4_sent_as_image_is_type_mismatch(client):
+    mp4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 40
+    r = client.post("/api/v1/moderate",
+                    files={"file": ("clip.jpg", mp4, "image/jpeg")},
+                    data={"content_type": "image", "user_id": VALID_USER})
+
+    assert r.json()["flags"] == ["type_mismatch"]
+
+
+def test_jpeg_sent_as_video_is_type_mismatch(client):
+    r = client.post("/api/v1/moderate", files=FILE,
+                    data={"content_type": "video", "user_id": VALID_USER})
+
+    assert r.json()["flags"] == ["type_mismatch"]
+
+
+def test_format_rejection_is_cached(client, sync_redis):
+    exe = b"MZ\x90\x00" + b"\x00" * 60
+    first = client.post("/api/v1/moderate",
+                        files={"file": ("fake.jpg", exe, "image/jpeg")},
+                        data={"content_type": "image", "user_id": VALID_USER}).json()
+    second = client.post("/api/v1/moderate",
+                         files={"file": ("fake.jpg", exe, "image/jpeg")},
+                         data={"content_type": "image", "user_id": VALID_USER}).json()
+
+    assert second == first  # a format rejection is a final decision, so it is stored
+
+def test_same_file_as_video_then_image_is_not_a_duplicate(client):
+    as_video = client.post("/api/v1/moderate", files=FILE,
+                           data={"content_type": "video", "user_id": VALID_USER}).json()
+    as_image = post_image(client).json()
+
+    assert as_video["flags"] == ["type_mismatch"]
+    assert as_image["decision"] == "HUMAN_REVIEW"
+    assert as_image["content_id"] != as_video["content_id"]
+
+
+def test_same_file_other_context_is_not_a_duplicate(client):
+    as_post = post_image(client).json()
+    as_breeding = client.post("/api/v1/moderate", files=FILE,
+                              data={"content_type": "image", "user_id": VALID_USER,
+                                    "context": "breeding"}).json()
+
+    assert as_breeding["content_id"] != as_post["content_id"]
 

@@ -4,12 +4,13 @@ from uuid import uuid4
 import fakeredis
 
 from app.api.schemas import ModerationResponse
-from app.cache.idempotency import IdempotencyStore, lock_key, result_key
+from app.cache.idempotency import IdempotencyStore, UploadKey, lock_key, result_key
 from app.core.config import settings
 
 
 SHA = "a" * 64
 USER = uuid4()
+KEY = UploadKey(SHA, USER, "image", "post")
 
 
 def make_response() -> ModerationResponse:
@@ -30,9 +31,9 @@ def test_store_then_get_returns_same_response():
         store = new_store()
         response = make_response()
 
-        assert await store.get_cached(SHA, USER) is None
-        await store.store(SHA, USER, response)
-        assert await store.get_cached(SHA, USER) == response
+        assert await store.get_cached(KEY) is None
+        await store.store(KEY, response)
+        assert await store.get_cached(KEY) == response
 
     asyncio.run(scenario())
 
@@ -40,9 +41,9 @@ def test_store_then_get_returns_same_response():
 def test_other_user_does_not_hit_cache():
     async def scenario():
         store = new_store()
-        await store.store(SHA, USER, make_response())
+        await store.store(KEY, make_response())
 
-        assert await store.get_cached(SHA, uuid4()) is None
+        assert await store.get_cached(UploadKey(SHA, uuid4(), "image", "post")) is None
 
     asyncio.run(scenario())
 
@@ -50,9 +51,9 @@ def test_other_user_does_not_hit_cache():
 def test_stored_response_expires_after_cache_ttl():
     async def scenario():
         store = new_store()
-        await store.store(SHA, USER, make_response())
+        await store.store(KEY, make_response())
 
-        ttl = await store.redis.ttl(result_key(SHA, USER))
+        ttl = await store.redis.ttl(result_key(KEY))
         assert 0 < ttl <= settings.redis.cache_ttl_seconds
 
     asyncio.run(scenario())
@@ -62,14 +63,14 @@ def test_lock_is_exclusive_until_released():
     async def scenario():
         store = new_store()
 
-        assert await store.lock(SHA, USER) is True
-        assert await store.lock(SHA, USER) is False
+        assert await store.lock(KEY) is True
+        assert await store.lock(KEY) is False
 
-        ttl = await store.redis.ttl(lock_key(SHA, USER))
+        ttl = await store.redis.ttl(lock_key(KEY))
         assert 0 < ttl <= settings.redis.lock_ttl_seconds
 
-        await store.release(SHA, USER)
-        assert await store.lock(SHA, USER) is True
+        await store.release(KEY)
+        assert await store.lock(KEY) is True
 
     asyncio.run(scenario())
 
@@ -84,10 +85,10 @@ def test_wait_for_result_returns_answer_stored_by_other_request(monkeypatch):
 
         async def other_request_finishes():
             await asyncio.sleep(0.05)
-            await store.store(SHA, USER, response)
+            await store.store(KEY, response)
 
         asyncio.create_task(other_request_finishes())
-        assert await store.wait_for_result(SHA, USER) == response
+        assert await store.wait_for_result(KEY) == response
 
     asyncio.run(scenario())
 
@@ -97,6 +98,26 @@ def test_wait_for_result_gives_up_after_wait_time(monkeypatch):
     monkeypatch.setattr(settings.redis, "lock_wait_seconds", 0.05)
 
     async def scenario():
-        assert await new_store().wait_for_result(SHA, USER) is None
+        assert await new_store().wait_for_result(KEY) is None
+
+    asyncio.run(scenario())
+
+
+def test_other_content_type_does_not_hit_cache():
+    async def scenario():
+        store = new_store()
+        await store.store(KEY, make_response())
+
+        assert await store.get_cached(UploadKey(SHA, USER, "video", "post")) is None
+
+    asyncio.run(scenario())
+
+
+def test_other_context_does_not_hit_cache():
+    async def scenario():
+        store = new_store()
+        await store.store(KEY, make_response())
+
+        assert await store.get_cached(UploadKey(SHA, USER, "image", "breeding")) is None
 
     asyncio.run(scenario())
