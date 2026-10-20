@@ -1,12 +1,10 @@
-
 import os
 from pathlib import Path
-
-import yaml
-from pydantic import BaseModel
-from dotenv import load_dotenv
 from typing import Literal
 
+import yaml
+from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, Field
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -14,7 +12,13 @@ CONFIG_FILE = PROJECT_ROOT / "config" / "settings.yaml"
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-class LimitsSettings(BaseModel):
+class StrictModel(BaseModel):
+    """Unknown keys are an error, so a typo in settings.yaml stops the app at startup."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LimitsSettings(StrictModel):
     image_max_bytes: int
     video_max_bytes: int
     max_video_duration_seconds: int
@@ -23,18 +27,17 @@ class LimitsSettings(BaseModel):
     image_max_pixels: int
 
 
-
-class FormatsSettings(BaseModel):
+class FormatsSettings(StrictModel):
     image: list[str]
     video: list[str]
 
 
-class TimeoutsSettings(BaseModel):
+class TimeoutsSettings(StrictModel):
     ffprobe_seconds: int
     frame_decode_seconds: int
 
 
-class RedisSettings(BaseModel):
+class RedisSettings(StrictModel):
     url: str
     cache_ttl_seconds: int
     lock_ttl_seconds: int
@@ -44,46 +47,62 @@ class RedisSettings(BaseModel):
     socket_timeout_seconds: float
 
 
-class IntakeSettings(BaseModel):
+class IntakeSettings(StrictModel):
     chunk_size_bytes: int
 
-class ToolsSettings(BaseModel):
+
+class ToolsSettings(StrictModel):
     ffprobe: str
     ffmpeg: str
-class MetadataSettings(BaseModel):
+
+
+class MetadataSettings(StrictModel):
     ai_generator_keywords: list[str]
-class LoggingSettings(BaseModel):
+
+
+class LoggingSettings(StrictModel):
     level: str
-class SafetySettings(BaseModel):
+
+
+class SafetySettings(StrictModel):
     # Only "placeholder" exists today. A typo here stops the app at startup.
     csam_provider: Literal["placeholder"]
 
 
-class AppSettings(BaseModel):
+class AppSettings(StrictModel):
     limits: LimitsSettings
     allowed_formats: FormatsSettings
     timeouts: TimeoutsSettings
     temp_dir: Path
     redis: RedisSettings
     model_version: str
-    intake:IntakeSettings
+    intake: IntakeSettings
     tools: ToolsSettings
     metadata: MetadataSettings
-    logging:LoggingSettings
-    safety:SafetySettings
+    logging: LoggingSettings
+    safety: SafetySettings
 
 
+class UniqueKeyLoader(yaml.SafeLoader):
+    """YAML normally lets a later duplicate key silently replace the first one."""
+
+    def construct_mapping(self, node, deep=False):
+        seen = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen:
+                line = key_node.start_mark.line + 1
+                raise ValueError(f"Duplicate key '{key}' in settings file (line {line})")
+            seen.add(key)
+        return super().construct_mapping(node, deep)
 
 
-def load_settings() -> AppSettings:
-    with CONFIG_FILE.open("r", encoding="utf-8") as file:
-        data = yaml.safe_load(file)
+def load_settings(path: Path = CONFIG_FILE) -> AppSettings:
+    with path.open("r", encoding="utf-8") as file:
+        data = yaml.load(file, Loader=UniqueKeyLoader)
 
     # Environment variables can override the Redis URL.
-    data["redis"]["url"] = os.getenv(
-        "REDIS_URL",
-        data["redis"]["url"],
-    )
+    data["redis"]["url"] = os.getenv("REDIS_URL", data["redis"]["url"])
 
     return AppSettings.model_validate(data)
 
