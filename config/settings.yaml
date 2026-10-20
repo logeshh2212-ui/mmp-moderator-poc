@@ -89,8 +89,8 @@ prepare:
   ffmpeg_hwaccel: none        # "auto" tries Intel Quick Sync / D3D11 video decoding
 
 ml:
-  device: cpu 
-  dtype: float32       # cpu on this laptop; cuda for the cloud NVIDIA run (Step 16b)
+  device: cpu        # cpu on this laptop; cuda for the cloud NVIDIA run (Step 16b)
+  dtype: float32     # float16 only on cuda (about 2x faster on NVIDIA, tiny accuracy change)
   num_threads: 4     # i5-10210U has 4 cores
   warmup: true       # run one tiny picture through each model at startup
   backbone: siglip2_base   # which SigLIP 2 the server loads; null = none

@@ -35,8 +35,6 @@ class SiglipEmbedder:
         self.dim: int | None = None
         self.device = torch.device(settings.ml.device)
         self.dtype = getattr(torch, settings.ml.dtype)
-
-
     def load(self) -> None:
         processor = AutoProcessor.from_pretrained(self.spec.repo, revision=self.spec.revision)
         model = AutoModel.from_pretrained(
@@ -77,9 +75,11 @@ class SiglipEmbedder:
         out = []
         size = settings.ml.batch_size
         for start in range(0, len(images), size):
+            batch = self.image_processor(images=images[start : start + size], return_tensors="pt")
             pixels = batch["pixel_values"].to(self.device, self.dtype)
             pooled = self.vision(pixel_values=pixels).pooler_output.float()
             out.append(torch.nn.functional.normalize(pooled, dim=-1).cpu())
+
 
         return torch.cat(out).numpy()
 

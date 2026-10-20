@@ -78,11 +78,12 @@ def bench(name, images, video, threads_list, runs):
         if images:
             pictures = [f.backbone for f in prepare_media(images[0], run_checks(images[0], "image")).frames] * 33
             for size in (1, 8, 33):
-                print(f"   throughput at batch 33: {33 / s:.1f} pictures/s (spec: 50 images/s)")
                 settings.ml.batch_size = size
                 _, s = timed(model.embed_images, pictures[:size])
                 print(f"   SigLIP only, batch {size:>2}: {s * 1000 / size:7.0f} ms per picture")
+            print(f"   throughput at batch 33: {33 / s:.1f} pictures/s (spec: 50 images/s)")
             settings.ml.batch_size = 16
+
 
             times = []
             for _ in range(runs):
