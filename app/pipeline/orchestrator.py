@@ -10,6 +10,7 @@ from app.validation.image_check import check_image
 from app.validation.metadata import read_image_metadata, read_video_metadata
 from app.validation.result import ValidationResult
 from app.validation.video_check import check_video
+from app.validation.csam import get_csam_checker
 
 
 def run_checks(path: Path, content_type: str) -> ValidationResult:
@@ -45,6 +46,14 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
         ctx.reject("MOD_008", failure.flag)
         return finish(ctx)
 
+    # Step 8b: must run before any model or reviewer could see the file.
+    ctx.csam = get_csam_checker().check(ctx.path, ctx.sha256)
+    if ctx.csam.match:
+        # A real provider will also move the file to restricted quarantine
+        # storage and start legal reporting before the temp file is deleted.
+        ctx.reject("MOD_004", "quarantined", hard=True)
+        return finish(ctx)
+
     ctx.flags.append("validation_passed")
 
     # Later phases each add one call here, for example:
@@ -53,6 +62,7 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
     #   if ctx.decision == "REJECTED":
     #       return finish(ctx)
     return finish(ctx)
+
 
 
 def finish(ctx: ModerationContext) -> ModerationResponse:

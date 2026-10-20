@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel
 from dotenv import load_dotenv
-
+from typing import Literal
 
 
 
@@ -40,6 +40,9 @@ class RedisSettings(BaseModel):
     lock_ttl_seconds: int
     lock_wait_seconds: float
     lock_poll_seconds: float
+    connect_timeout_seconds: float
+    socket_timeout_seconds: float
+
 
 class IntakeSettings(BaseModel):
     chunk_size_bytes: int
@@ -51,6 +54,9 @@ class MetadataSettings(BaseModel):
     ai_generator_keywords: list[str]
 class LoggingSettings(BaseModel):
     level: str
+class SafetySettings(BaseModel):
+    # Only "placeholder" exists today. A typo here stops the app at startup.
+    csam_provider: Literal["placeholder"]
 
 
 class AppSettings(BaseModel):
@@ -64,6 +70,7 @@ class AppSettings(BaseModel):
     tools: ToolsSettings
     metadata: MetadataSettings
     logging:LoggingSettings
+    safety:SafetySettings
 
 
 

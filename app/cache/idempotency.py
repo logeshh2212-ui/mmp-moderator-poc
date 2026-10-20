@@ -73,17 +73,21 @@ class IdempotencyStore:
                 return cached
         return None
 
-_redis = Redis.from_url(
-    settings.redis.url,
-    socket_connect_timeout=2,
-    socket_timeout=2,
-)
+def make_redis() -> Redis:
+    return Redis.from_url(
+        settings.redis.url,
+        socket_connect_timeout=settings.redis.connect_timeout_seconds,
+        socket_timeout=settings.redis.socket_timeout_seconds,
+    )
 
+
+_redis: Redis | None = None
 
 
 def get_idempotency_store() -> IdempotencyStore:
     """FastAPI dependency. Tests override this with a fakeredis-backed store."""
     global _redis
     if _redis is None:
-        _redis = Redis.from_url(settings.redis.url)
+        _redis = make_redis()
     return IdempotencyStore(_redis)
+

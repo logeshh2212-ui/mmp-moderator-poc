@@ -6,7 +6,7 @@ import fakeredis
 from app.api.schemas import ModerationResponse
 from app.cache.idempotency import IdempotencyStore, UploadKey, lock_key, result_key
 from app.core.config import settings
-
+from app.cache.idempotency import make_redis
 
 SHA = "a" * 64
 USER = uuid4()
@@ -121,3 +121,14 @@ def test_other_context_does_not_hit_cache():
         assert await store.get_cached(UploadKey(SHA, USER, "image", "breeding")) is None
 
     asyncio.run(scenario())
+
+
+def test_redis_client_uses_timeouts_from_settings(monkeypatch):
+    monkeypatch.setattr(settings.redis, "connect_timeout_seconds", 1.5)
+    monkeypatch.setattr(settings.redis, "socket_timeout_seconds", 2.5)
+
+    kwargs = make_redis().connection_pool.connection_kwargs
+
+    assert kwargs["socket_connect_timeout"] == 1.5
+    assert kwargs["socket_timeout"] == 2.5
+
