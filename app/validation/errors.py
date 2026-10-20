@@ -4,3 +4,6 @@ class ValidationFailure(Exception):
     def __init__(self, flag: str):
         super().__init__(flag)
         self.flag = flag
+        
+class ProcessingTimeout(Exception):
+    """An external tool took too long. Not a decision: never cached, caller may retry."""

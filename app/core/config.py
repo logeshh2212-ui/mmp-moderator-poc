@@ -44,6 +44,9 @@ class RedisSettings(BaseModel):
 class IntakeSettings(BaseModel):
     chunk_size_bytes: int
 
+class ToolsSettings(BaseModel):
+    ffprobe: str
+    ffmpeg: str
 
 class AppSettings(BaseModel):
     limits: LimitsSettings
@@ -53,6 +56,8 @@ class AppSettings(BaseModel):
     redis: RedisSettings
     model_version: str
     intake:IntakeSettings
+    tools: ToolsSettings
+
 
 
 

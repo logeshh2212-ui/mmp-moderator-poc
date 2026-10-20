@@ -232,5 +232,38 @@ def test_huge_png_is_too_large_pixels(client):
     body = post_bytes(client, png_header_only(50_000, 50_000), "bomb.png").json()
 
     assert body["flags"] == ["image_too_large_pixels"]
+def post_video(client, path):
+    return client.post("/api/v1/moderate",
+                       files={"file": (path.name, path.read_bytes(), "video/mp4")},
+                       data={"content_type": "video", "user_id": VALID_USER})
+
+
+def test_valid_video_goes_to_review(client, videos, temp_dir):
+    body = post_video(client, videos["mp4"]).json()
+
+    assert body["decision"] == "HUMAN_REVIEW"
+    assert list(temp_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize("name, flag", [
+    ("61s", "duration_exceeded"),
+    ("audio_only", "no_video_stream"),
+    ("corrupt", "corrupt_file"),
+])
+def test_bad_videos_rejected(client, videos, name, flag):
+    body = post_video(client, videos[name]).json()
+
+    assert body["decision"] == "REJECTED"
+    assert body["rejection_code"] == "MOD_008"
+    assert body["flags"] == [flag]
+
+
+def test_timeout_is_503_and_not_cached(client, videos, sync_redis, monkeypatch):
+    monkeypatch.setattr(settings.timeouts, "ffprobe_seconds", 0.001)
+
+    r = post_video(client, videos["mp4"])
+
+    assert r.status_code == 503
+    assert sync_redis.keys("mod:*") == []  # no stored answer, no lock left behind
 
 

@@ -14,6 +14,9 @@ from app.cache.idempotency import IdempotencyStore, UploadKey, get_idempotency_s
 
 from fastapi.concurrency import run_in_threadpool
 from app.validation.image_check import check_image
+from app.validation.errors import ProcessingTimeout, ValidationFailure
+from app.validation.video_check import check_video
+
 
 
 
@@ -22,9 +25,12 @@ router = APIRouter()
 
 def run_checks(path: Path, content_type: str) -> None:
     """Steps 5-8 add their checks here. Raise ValidationFailure to reject."""
-    check_format(path, content_type)
+    file_format = check_format(path, content_type)
     if content_type == "image":
         check_image(path)
+    else:
+        check_video(path, file_format)
+
 
 
 def build_response(
@@ -68,6 +74,19 @@ async def moderate_content(
     except ValidationFailure as failure:
         # We stopped reading, so there is no full hash: this answer is not cached.
         return build_response(content_id, start, failure)
+
+    try:
+        await run_in_threadpool(run_checks, intake.path, content_type)
+        response = build_response(content_id, start)
+    except ValidationFailure as failure:
+        response = build_response(content_id, start, failure)
+    except ProcessingTimeout:
+        # Not a decision: skip storing, release the lock, let the caller retry.
+        raise HTTPException(
+                status_code=503,
+                detail="Processing timed out. Try again shortly.",
+            )
+
 
     key = UploadKey(intake.sha256, user_id, content_type, context)
 

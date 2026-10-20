@@ -38,3 +38,8 @@ model_version: validation-0.1
 intake:
   chunk_size_bytes: 1048576
 
+tools:
+  ffprobe: ffprobe
+  ffmpeg: ffmpeg
+
+
