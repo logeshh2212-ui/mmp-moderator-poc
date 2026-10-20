@@ -1,6 +1,6 @@
 
 limits:
-  image_max_bytes: 20971520
+  image_max_bytes: 52428800
   video_max_bytes: 209715200
   max_video_duration_seconds: 60
   duration_tolerance_seconds: 0.5
@@ -22,6 +22,8 @@ allowed_formats:
 timeouts:
   ffprobe_seconds: 10
   frame_decode_seconds: 15
+  frame_sample_seconds: 60
+
 
 temp_dir: 'D:\mmp-moderator-poc\data\tmp'
 
@@ -76,5 +78,14 @@ blocklist:
   auto_block_codes:
     - MOD_004
 
+prepare:
+  backbone_size: 384          # SigLIP 2 (long side, aspect ratio kept)
+  detector_size: 640          # RF-DETR (long side, aspect ratio kept)
+  short_video_seconds: 10     # below this: one frame every short interval
+  short_video_interval_seconds: 0.5
+  long_video_interval_seconds: 1.0
+  last_frame_offset_seconds: 0.1
+  max_video_frames: 63
+  ffmpeg_hwaccel: none        # "auto" tries Intel Quick Sync / D3D11 video decoding
 
 

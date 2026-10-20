@@ -13,6 +13,7 @@ from app.validation.video_check import check_video
 from app.validation.csam import get_csam_checker
 from app.cache.blocklist import get_blocklist
 from app.core.config import settings
+from app.prepare import prepare_media
 
 
 
@@ -66,14 +67,21 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
             ctx.reject(entry.rejection_code, "known_bad_image", hard=entry.hard_reject)
             return finish(ctx)
 
+    # Graph Step 2 (Steps 13-14): decode and resize for the models.
+    try:
+        ctx.prepared = prepare_media(ctx.path, ctx.validation)
+    except ValidationFailure as failure:
+        ctx.reject("MOD_008", failure.flag)
+        return finish(ctx)
+
     ctx.flags.append("validation_passed")
 
     # Later phases each add one call here, for example:
-    #   prepare(ctx)        Steps 13-14: resize, sample frames
-    #   gate1(ctx)          Phase 3: pet score; may reject with MOD_001
+    #   gate1(ctx)          Phase 2: pet score; may reject with MOD_001
     #   if ctx.decision == "REJECTED":
     #       return finish(ctx)
     return finish(ctx)
+
 
 
 

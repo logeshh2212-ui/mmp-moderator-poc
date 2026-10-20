@@ -9,8 +9,6 @@ import shutil
 import subprocess
 from app.cache.blocklist import PhashBlocklist
 
-
-
 @pytest.fixture(autouse=True)
 def temp_dir(tmp_path, monkeypatch):
     """Every test writes uploads to its own empty folder."""

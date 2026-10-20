@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.validation.result import ValidationResult
 from app.validation.csam import CsamResult
 from app.cache.blocklist import BlocklistMatch
+from app.prepare.media import PreparedMedia
 
 
 
@@ -35,6 +36,8 @@ class ModerationContext:
         # Step 10b: pHash blocklist
     blocklist_match: BlocklistMatch | None = None
 
+    # Graph Step 2: pictures at model sizes, for Gate 1 and later
+    prepared: PreparedMedia | None = None
 
     # Filled in by later phases (Gate 1, Gate 2, scoring, AI label)
     pet_score: float | None = None

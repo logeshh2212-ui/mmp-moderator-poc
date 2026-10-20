@@ -35,6 +35,7 @@ class FormatsSettings(StrictModel):
 class TimeoutsSettings(StrictModel):
     ffprobe_seconds: int
     frame_decode_seconds: int
+    frame_sample_seconds: int
 
 
 class RedisSettings(StrictModel):
@@ -72,6 +73,16 @@ class BlocklistSettings(StrictModel):
     max_distance: int = Field(ge=0, le=7)
     auto_block_codes: list[str]
 
+class PrepareSettings(StrictModel):
+    backbone_size: int = Field(gt=0)
+    detector_size: int = Field(gt=0)
+    short_video_seconds: float = Field(gt=0)
+    short_video_interval_seconds: float = Field(gt=0)
+    long_video_interval_seconds: float = Field(gt=0)
+    last_frame_offset_seconds: float = Field(ge=0)
+    max_video_frames: int = Field(ge=3)
+    ffmpeg_hwaccel: str  # "none", "auto", "d3d11va", "qsv"
+
 
 class AppSettings(StrictModel):
     limits: LimitsSettings
@@ -86,6 +97,7 @@ class AppSettings(StrictModel):
     logging: LoggingSettings
     safety: SafetySettings
     blocklist: BlocklistSettings
+    prepare: PrepareSettings
 
 
 
