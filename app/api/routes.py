@@ -12,6 +12,9 @@ from app.validation.intake import remove_temp_file, save_upload
 from app.validation.formats import check_format
 from app.cache.idempotency import IdempotencyStore, UploadKey, get_idempotency_store
 
+from fastapi.concurrency import run_in_threadpool
+from app.validation.image_check import check_image
+
 
 
 router = APIRouter()
@@ -20,6 +23,9 @@ router = APIRouter()
 def run_checks(path: Path, content_type: str) -> None:
     """Steps 5-8 add their checks here. Raise ValidationFailure to reject."""
     check_format(path, content_type)
+    if content_type == "image":
+        check_image(path)
+
 
 def build_response(
     content_id: UUID,
@@ -81,7 +87,7 @@ async def moderate_content(
 
         try:
             try:
-                run_checks(intake.path, content_type)
+                await run_in_threadpool(run_checks, intake.path, content_type)
                 response = build_response(content_id, start)
             except ValidationFailure as failure:
                 response = build_response(content_id, start, failure)

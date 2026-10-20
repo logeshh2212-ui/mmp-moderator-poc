@@ -104,7 +104,7 @@ def test_same_file_other_user_is_processed_separately(client):
 
 def test_lock_released_after_request(client, sync_redis):
     post_image(client)
-    
+
 
     assert sync_redis.exists(lock_key(FILE_KEY)) == 0
     assert sync_redis.exists(result_key(FILE_KEY)) == 1
@@ -206,4 +206,31 @@ def test_same_file_other_context_is_not_a_duplicate(client):
                                     "context": "breeding"}).json()
 
     assert as_breeding["content_id"] != as_post["content_id"]
+
+def post_bytes(client, data: bytes, name: str = "img.jpg"):
+    return client.post("/api/v1/moderate",
+                       files={"file": (name, data, "image/jpeg")},
+                       data={"content_type": "image", "user_id": VALID_USER})
+
+
+def test_truncated_jpeg_is_corrupt_file(client, temp_dir):
+    data = make_jpeg((256, 256))
+    body = post_bytes(client, data[: len(data) // 2]).json()
+
+    assert body["decision"] == "REJECTED"
+    assert body["flags"] == ["corrupt_file"]
+    assert list(temp_dir.iterdir()) == []
+
+
+def test_tiny_image_is_too_small(client):
+    assert post_bytes(client, make_jpeg((16, 16))).json()["flags"] == ["image_too_small"]
+
+
+def test_huge_png_is_too_large_pixels(client):
+    from tests.test_image_check import png_header_only
+
+    body = post_bytes(client, png_header_only(50_000, 50_000), "bomb.png").json()
+
+    assert body["flags"] == ["image_too_large_pixels"]
+
 

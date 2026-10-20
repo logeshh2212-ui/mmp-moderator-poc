@@ -5,6 +5,8 @@ limits:
   max_video_duration_seconds: 60
   duration_tolerance_seconds: 0.5
   min_image_side_pixels: 32
+  image_max_pixels: 89478485
+
 
 allowed_formats:
   image:

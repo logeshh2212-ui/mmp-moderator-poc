@@ -20,6 +20,8 @@ class LimitsSettings(BaseModel):
     max_video_duration_seconds: int
     duration_tolerance_seconds: float
     min_image_side_pixels: int
+    image_max_pixels: int
+
 
 
 class FormatsSettings(BaseModel):
