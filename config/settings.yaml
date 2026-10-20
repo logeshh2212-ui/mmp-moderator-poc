@@ -29,3 +29,7 @@ redis:
   lock_ttl_seconds: 60
 
 model_version: validation-0.1
+
+intake:
+  chunk_size_bytes: 1048576
+

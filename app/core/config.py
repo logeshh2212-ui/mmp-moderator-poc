@@ -37,6 +37,9 @@ class RedisSettings(BaseModel):
     cache_ttl_seconds: int
     lock_ttl_seconds: int
 
+class IntakeSettings(BaseModel):
+    chunk_size_bytes: int
+
 
 class AppSettings(BaseModel):
     limits: LimitsSettings
@@ -45,6 +48,9 @@ class AppSettings(BaseModel):
     temp_dir: Path
     redis: RedisSettings
     model_version: str
+    intake:IntakeSettings
+
+
 
 
 def load_settings() -> AppSettings:
