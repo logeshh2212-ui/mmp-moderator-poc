@@ -88,4 +88,9 @@ prepare:
   max_video_frames: 63
   ffmpeg_hwaccel: none        # "auto" tries Intel Quick Sync / D3D11 video decoding
 
+ml:
+  device: cpu        # cpu on this laptop; cuda for the cloud NVIDIA run (Step 16b)
+  num_threads: 4     # i5-10210U has 4 cores
+  warmup: true       # run one tiny picture through each model at startup
+  models: {}         # Step 16 adds SigLIP 2 here (repo, pinned revision, licence)
 

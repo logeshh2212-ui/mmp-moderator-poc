@@ -20,7 +20,12 @@ VALID_USER = "3f2b8c1e-0000-4000-8000-000000000001"
 FILE = {"file": ("x.jpg", make_jpeg(), "image/jpeg")}
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    body = client.get("/health").json()
+
+    assert body["status"] == "ok"
+    assert body["device"] == "cpu"
+    assert body["models"] == {}
+
 
 
 def test_missing_user_id_is_422(client):

@@ -83,6 +83,18 @@ class PrepareSettings(StrictModel):
     max_video_frames: int = Field(ge=3)
     ffmpeg_hwaccel: str  # "none", "auto", "d3d11va", "qsv"
 
+class ModelSettings(StrictModel):
+    repo: str          # Hugging Face repo, e.g. google/siglip2-base-patch16-384
+    revision: str      # exact commit hash, so the model can never change silently
+    licence: str
+
+
+class MLSettings(StrictModel):
+    device: Literal["cpu", "cuda"]  # "openvino" is added in Step 16c
+    num_threads: int = Field(ge=1)
+    warmup: bool
+    models: dict[str, ModelSettings]
+
 
 class AppSettings(StrictModel):
     limits: LimitsSettings
@@ -98,7 +110,7 @@ class AppSettings(StrictModel):
     safety: SafetySettings
     blocklist: BlocklistSettings
     prepare: PrepareSettings
-
+    ml:MLSettings
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
