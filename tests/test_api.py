@@ -1,11 +1,20 @@
 import hashlib
 import io
 import logging
+
 import pytest
+import redis.exceptions
 from PIL import Image
 
-from app.cache.idempotency import UploadKey, lock_key, result_key
+from app.cache.idempotency import (
+    IdempotencyStore,
+    UploadKey,
+    get_idempotency_store,
+    lock_key,
+    result_key,
+)
 from app.core.config import settings
+from app.main import app
 from app.pipeline.orchestrator import run_checks
 from app.validation.metadata import MediaMetadata
 
@@ -332,3 +341,39 @@ def test_timeout_leaves_no_temp_file(client, videos, temp_dir, monkeypatch):
     assert post_video(client, videos["mp4"]).status_code == 503
     assert list(temp_dir.iterdir()) == []
 
+
+
+class RedisDown:
+    """Every Redis call fails, like when Docker Desktop is not running."""
+
+    def __getattr__(self, name):
+        async def fail(*args, **kwargs):
+            raise redis.exceptions.ConnectionError("Error connecting to 127.0.0.1:6379")
+        return fail
+
+
+def test_redis_down_is_503_not_500(client, temp_dir, caplog):
+    app.dependency_overrides[get_idempotency_store] = lambda: IdempotencyStore(RedisDown())
+
+    with caplog.at_level(logging.WARNING, logger="mmp.moderation"):
+        r = post_image(client)
+
+    assert r.status_code == 503
+    assert "unavailable" in r.json()["detail"]
+    assert list(temp_dir.iterdir()) == []
+    assert "status=503" in caplog.text
+    assert "redis unavailable" in caplog.text
+
+
+def test_blocklist_down_is_503_and_nothing_cached(client, sync_redis, temp_dir, monkeypatch):
+    class BlocklistDown:
+        def find(self, phash):
+            raise redis.exceptions.TimeoutError("Timeout connecting to server")
+
+    monkeypatch.setattr("app.pipeline.orchestrator.get_blocklist", lambda: BlocklistDown())
+
+    r = post_image(client)
+
+    assert r.status_code == 503
+    assert sync_redis.keys("mod:*") == []  # no stored answer, lock released
+    assert list(temp_dir.iterdir()) == []

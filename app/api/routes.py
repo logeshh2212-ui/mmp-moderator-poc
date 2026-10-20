@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from redis.exceptions import RedisError
 
 from app.api.schemas import ContentContext, ContentType, ModerationResponse
 from app.cache.idempotency import IdempotencyStore, UploadKey, get_idempotency_store
@@ -83,5 +84,12 @@ async def moderate_content(
             return response
         finally:
             await store.release(key)
+    except RedisError as exc:
+        # Redis is down: no duplicate protection and no blocklist, so no decision.
+        log_problem(503, ctx.content_id, f"redis unavailable: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail="Duplicate-protection store unavailable. Try again shortly.",
+        )
     finally:
         remove_temp_file(intake.path)
