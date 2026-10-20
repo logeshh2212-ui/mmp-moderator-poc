@@ -4,7 +4,7 @@ from typing import Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -93,7 +93,21 @@ class MLSettings(StrictModel):
     device: Literal["cpu", "cuda"]  # "openvino" is added in Step 16c
     num_threads: int = Field(ge=1)
     warmup: bool
+    backbone: str | None
+    batch_size: int = Field(ge=1)
     models: dict[str, ModelSettings]
+    prompts: dict[str, str]
+
+    @model_validator(mode="after")
+    def backbone_is_a_known_model(self):
+        if self.backbone is not None and self.backbone not in self.models:
+            raise ValueError(f"ml.backbone '{self.backbone}' is not listed in ml.models")
+        return self
+
+
+class TargetsSettings(StrictModel):
+    image_p95_seconds: float
+    video_p95_seconds: float
 
 
 class AppSettings(StrictModel):
@@ -110,7 +124,8 @@ class AppSettings(StrictModel):
     safety: SafetySettings
     blocklist: BlocklistSettings
     prepare: PrepareSettings
-    ml:MLSettings
+    ml: MLSettings
+    targets: TargetsSettings
 
 
 class UniqueKeyLoader(yaml.SafeLoader):

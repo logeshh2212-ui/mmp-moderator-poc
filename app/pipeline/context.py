@@ -3,6 +3,8 @@ from pathlib import Path
 from time import perf_counter
 from uuid import UUID
 
+import numpy as np
+
 from app.api.schemas import Decision, DimensionScores, ModerationResponse
 from app.core.config import settings
 from app.validation.result import ValidationResult
@@ -33,11 +35,15 @@ class ModerationContext:
         # Step 8b: CSAM hash check
     csam: CsamResult | None = None
 
-        # Step 10b: pHash blocklist
+    # Step 10b: pHash blocklist
     blocklist_match: BlocklistMatch | None = None
 
     # Graph Step 2: pictures at model sizes, for Gate 1 and later
     prepared: PreparedMedia | None = None
+
+    # Step 16: SigLIP 2, one embedding per image / frame (reused by Gate 1 and Gate 2)
+    embeddings: np.ndarray | None = None
+    prompt_probs: dict[str, list[float]] | None = None
 
     # Filled in by later phases (Gate 1, Gate 2, scoring, AI label)
     pet_score: float | None = None

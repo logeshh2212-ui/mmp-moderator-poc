@@ -92,5 +92,27 @@ ml:
   device: cpu        # cpu on this laptop; cuda for the cloud NVIDIA run (Step 16b)
   num_threads: 4     # i5-10210U has 4 cores
   warmup: true       # run one tiny picture through each model at startup
-  models: {}         # Step 16 adds SigLIP 2 here (repo, pinned revision, licence)
+  backbone: siglip2_base   # which SigLIP 2 the server loads; null = none
+  batch_size: 16           # video frames per SigLIP pass
+  models:
+    siglip2_base:
+      repo: google/siglip2-base-patch16-384
+      revision: f775b65a79762255128c981547af89addcfe0f88
+      licence: Apache-2.0
+    siglip2_large:
+      repo: google/siglip2-so400m-patch16-384
+      revision: dd658faac399427308559e2c3ac1e99cbe43845d
+      licence: Apache-2.0
+  # Step 16 sanity sentences. Step 17 replaces them with the Gate 1 set.
+  # They are embedded once at startup; the text half of the model is then deleted.
+  prompts:
+    animal: "a photo of an animal"
+    cat: "a photo of a cat"
+    dog: "a photo of a dog"
+    food: "a photo of food"
+    no_animal: "a photo with no animal in it"
+
+targets:   # spec MMP-MOD-2026-001, non-functional requirements
+  image_p95_seconds: 3
+  video_p95_seconds: 15
 

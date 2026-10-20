@@ -56,4 +56,16 @@ def load_models() -> None:
     from app.ml.runtime import configure_torch  # imports torch only when we really need it
 
     configure_torch()
+    if settings.ml.backbone:
+        from app.ml.siglip import SiglipEmbedder
+
+        registry.register(SiglipEmbedder(settings.ml.backbone))
     registry.load_all()
+
+
+def get_backbone():
+    """The loaded SigLIP 2 model, or None if none is configured or it failed to load."""
+    name = settings.ml.backbone
+    if name and registry.status.get(name) == "ready":
+        return registry.get(name)
+    return None

@@ -13,6 +13,7 @@ from app.validation.video_check import check_video
 from app.validation.csam import get_csam_checker
 from app.cache.blocklist import get_blocklist
 from app.core.config import settings
+from app.ml.registry import get_backbone
 from app.prepare import prepare_media
 
 
@@ -73,6 +74,12 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
     except ValidationFailure as failure:
         ctx.reject("MOD_008", failure.flag)
         return finish(ctx)
+
+    # Step 16: one SigLIP 2 pass per image / frame; Gate 1 (and later Gate 2) reuse it.
+    backbone = get_backbone()
+    if backbone is not None:
+        ctx.embeddings = backbone.embed_images([frame.backbone for frame in ctx.prepared.frames])
+        ctx.prompt_probs = backbone.probabilities(ctx.embeddings)
 
     ctx.flags.append("validation_passed")
 

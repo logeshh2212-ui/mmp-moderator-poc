@@ -10,6 +10,16 @@ import subprocess
 from app.cache.blocklist import PhashBlocklist
 
 @pytest.fixture(autouse=True)
+def no_real_models(monkeypatch):
+    """Normal tests never load SigLIP; real-model tests are marked 'models'."""
+    from app.ml.registry import registry
+
+    monkeypatch.setattr(settings.ml, "backbone", None)
+    yield
+    registry.clear()
+
+
+@pytest.fixture(autouse=True)
 def temp_dir(tmp_path, monkeypatch):
     """Every test writes uploads to its own empty folder."""
     monkeypatch.setattr(settings, "temp_dir", tmp_path)

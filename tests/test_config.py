@@ -52,3 +52,11 @@ def test_missing_key_is_rejected(tmp_path):
     with pytest.raises(ValidationError) as exc:
         load_settings(write_settings(tmp_path, text))
     assert "socket_timeout_seconds" in str(exc.value)
+
+
+def test_backbone_must_be_a_listed_model(tmp_path):
+    text = real_settings().replace("backbone: siglip2_base", "backbone: siglip3_huge")
+
+    with pytest.raises(ValidationError) as exc:
+        load_settings(write_settings(tmp_path, text))
+    assert "siglip3_huge" in str(exc.value)

@@ -2,6 +2,7 @@ import logging
 from time import perf_counter
 from uuid import uuid4
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -18,6 +19,7 @@ def make_ctx(path, content_type="image") -> ModerationContext:
         context="post",
         started_at=perf_counter(),
         path=path,
+        sha256="a" * 64,
     )
 
 
@@ -86,3 +88,33 @@ def test_processing_ms_is_measured(tmp_path):
     ctx.started_at -= 0.25  # pretend the request started 250 ms ago
 
     assert orchestrator.run_pipeline(ctx).processing_ms >= 250
+
+
+class FakeBackbone:
+    """Stands in for SigLIP 2 in normal tests."""
+
+    def embed_images(self, images):
+        return np.full((len(images), 4), 0.5, dtype=np.float32)
+
+    def probabilities(self, embeds):
+        return {"animal": [0.9] * len(embeds)}
+
+
+def test_embeddings_are_stored_when_a_model_is_loaded(tmp_path, monkeypatch):
+    monkeypatch.setattr(orchestrator, "get_backbone", lambda: FakeBackbone())
+    ctx = make_ctx(jpeg(tmp_path))
+
+    response = orchestrator.run_pipeline(ctx)
+
+    assert response.flags == ["validation_passed"]
+    assert ctx.embeddings.shape == (1, 4)
+    assert ctx.prompt_probs == {"animal": [0.9]}
+
+
+def test_no_model_means_no_embeddings_but_still_valid(tmp_path):
+    ctx = make_ctx(jpeg(tmp_path))
+
+    response = orchestrator.run_pipeline(ctx)
+
+    assert response.flags == ["validation_passed"]
+    assert ctx.embeddings is None
