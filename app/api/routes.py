@@ -4,17 +4,18 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from app.api.schemas import ContentContext, ContentType, ModerationResponse
-from app.core.config import settings
-from app.validation.errors import ValidationFailure
-from app.validation.intake import remove_temp_file, save_upload
-from app.validation.formats import check_format
 from app.cache.idempotency import IdempotencyStore, UploadKey, get_idempotency_store
-
-from fastapi.concurrency import run_in_threadpool
-from app.validation.image_check import check_image
+from app.core.config import settings
 from app.validation.errors import ProcessingTimeout, ValidationFailure
+from app.validation.formats import check_format
+from app.validation.hashing import phash_image, phash_png_bytes
+from app.validation.image_check import check_image
+from app.validation.intake import remove_temp_file, save_upload
+from app.validation.metadata import read_image_metadata, read_video_metadata
+from app.validation.result import ValidationResult
 from app.validation.video_check import check_video
 
 
@@ -23,13 +24,27 @@ from app.validation.video_check import check_video
 router = APIRouter()
 
 
-def run_checks(path: Path, content_type: str) -> None:
-    """Steps 5-8 add their checks here. Raise ValidationFailure to reject."""
+def run_checks(path: Path, content_type: str) -> ValidationResult:
+    """Run every validation check. Raise ValidationFailure to reject."""
     file_format = check_format(path, content_type)
+
     if content_type == "image":
-        check_image(path)
-    else:
-        check_video(path, file_format)
+        image = check_image(path)
+        return ValidationResult(
+            file_format=file_format,
+            image=image,
+            metadata=read_image_metadata(path),
+            phash=phash_image(path, image.orientation),
+        )
+
+    video = check_video(path, file_format)
+    return ValidationResult(
+        file_format=file_format,
+        video=video,
+        metadata=read_video_metadata(video.tags),
+        phash=phash_png_bytes(video.first_frame_png),
+    )
+
 
 
 
@@ -76,7 +91,9 @@ async def moderate_content(
         return build_response(content_id, start, failure)
 
     try:
-        await run_in_threadpool(run_checks, intake.path, content_type)
+        validation = await run_in_threadpool(run_checks, intake.path, content_type)
+        _ = validation  # Step 9 (orchestrator) puts this into the context object
+
         response = build_response(content_id, start)
     except ValidationFailure as failure:
         response = build_response(content_id, start, failure)

@@ -23,6 +23,8 @@ class VideoInfo:
     has_audio: bool
     audio_codec: str | None
     first_frame_png: bytes  # Step 8 computes the perceptual hash from this
+    tags: dict[str, str]  # ffprobe format tags; Step 8 reads metadata from these
+
 
 
 def run_tool(args: list[str], timeout: float) -> subprocess.CompletedProcess:
@@ -131,4 +133,6 @@ def check_video(path: Path, file_format: str) -> VideoInfo:
         has_audio=audio is not None,
         audio_codec=audio.get("codec_name") if audio else None,
         first_frame_png=first_frame,
+        tags=info.get("format", {}).get("tags", {}),
+
     )

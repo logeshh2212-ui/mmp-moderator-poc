@@ -47,6 +47,8 @@ class IntakeSettings(BaseModel):
 class ToolsSettings(BaseModel):
     ffprobe: str
     ffmpeg: str
+class MetadataSettings(BaseModel):
+    ai_generator_keywords: list[str]
 
 class AppSettings(BaseModel):
     limits: LimitsSettings
@@ -57,7 +59,7 @@ class AppSettings(BaseModel):
     model_version: str
     intake:IntakeSettings
     tools: ToolsSettings
-
+    metadata: MetadataSettings
 
 
 

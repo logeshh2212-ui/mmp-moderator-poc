@@ -6,6 +6,8 @@ from PIL import Image
 
 from app.cache.idempotency import UploadKey, lock_key, result_key
 from app.core.config import settings
+from app.api.routes import run_checks
+from app.validation.metadata import MediaMetadata
 
 
 def make_jpeg(size=(64, 64)) -> bytes:
@@ -266,4 +268,23 @@ def test_timeout_is_503_and_not_cached(client, videos, sync_redis, monkeypatch):
     assert r.status_code == 503
     assert sync_redis.keys("mod:*") == []  # no stored answer, no lock left behind
 
+def test_valid_image_has_metadata_and_hash(tmp_path):
+    path = tmp_path / "x.jpg"
+    path.write_bytes(FILE["file"][1])
 
+    result = run_checks(path, "image")
+
+    assert result.file_format == "jpeg"
+    assert result.image is not None
+    assert isinstance(result.metadata, MediaMetadata)
+    assert len(result.phash) == 16
+
+
+@pytest.mark.parametrize("name", ["mp4", "mov", "avi"])
+def test_valid_video_has_metadata_and_hash(videos, name):
+    result = run_checks(videos[name], "video")
+
+    assert result.file_format == name
+    assert result.video is not None
+    assert isinstance(result.metadata, MediaMetadata)
+    assert len(result.phash) == 16

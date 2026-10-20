@@ -41,5 +41,23 @@ intake:
 tools:
   ffprobe: ffprobe
   ffmpeg: ffmpeg
+  
+metadata:
+  ai_generator_keywords:
+    - dall-e
+    - "dall·e"
+    - midjourney
+    - stable diffusion
+    - firefly
+    - imagen
+    - novelai
+    - comfyui
+    - automatic1111
+    - invokeai
+    - leonardo
+    - ideogram
+    - flux
+    - sora
+    - runway
 
 

@@ -130,9 +130,12 @@ def test_50000_by_50000_png_rejected(tmp_path):
 
 
 def test_just_over_pixel_limit_rejected(tmp_path, monkeypatch):
+    # Remember Pillow's global so pytest puts it back after this test.
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", Image.MAX_IMAGE_PIXELS)
     # Between the limit and 2x the limit Pillow only warns; we must still reject.
     monkeypatch.setattr(settings.limits, "image_max_pixels", 1000)
 
     with pytest.raises(ValidationFailure) as exc:
         check_image(save(tmp_path, Image.new("RGB", (40, 40)), "PNG"))  # 1600 px
     assert exc.value.flag == "image_too_large_pixels"
+
