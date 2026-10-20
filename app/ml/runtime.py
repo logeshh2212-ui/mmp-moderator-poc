@@ -14,6 +14,8 @@ def configure_torch() -> str:
     torch.set_num_threads(settings.ml.num_threads)
 
     device = settings.ml.device
+    if device == "cuda":
+        logger.info("GPU: %s", torch.cuda.get_device_name(0))
     if device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("ml.device is 'cuda' but no NVIDIA GPU is available")
 

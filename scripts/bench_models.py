@@ -32,10 +32,13 @@ def timed(fn, *args):
 
 
 def end_to_end(model, path, content_type):
-    """What one upload costs: validation + pre-processing + SigLIP."""
+    """What one upload costs: validation + pre-processing, then SigLIP (timed separately)."""
+    start = time.perf_counter()
     prepared = prepare_media(path, run_checks(path, content_type))
+    middle = time.perf_counter()
     embeds = model.embed_images([f.backbone for f in prepared.frames])
-    return model.probabilities(embeds), len(prepared.frames)
+    return model.probabilities(embeds), len(prepared.frames), middle - start, time.perf_counter() - middle
+
 
 
 def pct(values, q) -> float:
@@ -75,6 +78,7 @@ def bench(name, images, video, threads_list, runs):
         if images:
             pictures = [f.backbone for f in prepare_media(images[0], run_checks(images[0], "image")).frames] * 33
             for size in (1, 8, 33):
+                print(f"   throughput at batch 33: {33 / s:.1f} pictures/s (spec: 50 images/s)")
                 settings.ml.batch_size = size
                 _, s = timed(model.embed_images, pictures[:size])
                 print(f"   SigLIP only, batch {size:>2}: {s * 1000 / size:7.0f} ms per picture")
@@ -91,20 +95,24 @@ def bench(name, images, video, threads_list, runs):
                   f"{settings.targets.image_p95_seconds:g} s]")
 
         if video:
-            times, frames = [], 0
+            times, preps, models_s, frames = [], [], [], 0
             for _ in range(max(1, runs // 2)):
-                (_, frames), s = timed(end_to_end, model, video, "video")
+                (_, frames, prep_s, model_s), s = timed(end_to_end, model, video, "video")
                 times.append(s)
+                preps.append(prep_s)
+                models_s.append(model_s)
             p95 = pct(times, 95)
             print(f"   video end-to-end ({frames} frames, {len(times)} runs): p50 {pct(times, 50):.1f} s · "
                   f"p95 {p95:.1f} s  [{mark(p95, settings.targets.video_p95_seconds)} < "
                   f"{settings.targets.video_p95_seconds:g} s]")
+            print(f"      of which pre-processing {np.mean(preps):.1f} s, SigLIP {np.mean(models_s):.1f} s")
+
 
     if images:
         torch.set_num_threads(settings.ml.num_threads)
         print("\n-- sanity: best-matching sentence per image")
         for path in images:
-            probs, _ = end_to_end(model, path, "image")
+            probs, *_ = end_to_end(model, path, "image")
             best = max(probs, key=lambda label: probs[label][0])
             others = ", ".join(f"{label} {values[0]:.2f}" for label, values in probs.items())
             print(f"   {path.name:<28} -> {best:<10} ({others})")
@@ -123,7 +131,10 @@ def main() -> None:
     args = parser.parse_args()
 
     images = valid_images(args.images)
-    print(f"torch {torch.__version__} · {len(images)} valid images · video: {args.video or '-'}")
+    gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none"
+    print(f"torch {torch.__version__} · device {settings.ml.device} ({settings.ml.dtype}) · GPU {gpu} · "
+          f"{len(images)} valid images · video: {args.video or '-'}")
+
     for name in args.models:
         bench(name, images, args.video, args.threads, args.runs)
 

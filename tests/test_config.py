@@ -60,3 +60,20 @@ def test_backbone_must_be_a_listed_model(tmp_path):
     with pytest.raises(ValidationError) as exc:
         load_settings(write_settings(tmp_path, text))
     assert "siglip3_huge" in str(exc.value)
+
+def test_float16_on_cpu_is_rejected(tmp_path):
+    text = real_settings().replace("dtype: float32", "dtype: float16")
+
+    with pytest.raises(ValidationError) as exc:
+        load_settings(write_settings(tmp_path, text))
+    assert "float16" in str(exc.value)
+
+
+def test_device_can_be_switched_by_environment(monkeypatch):
+    monkeypatch.setenv("ML_DEVICE", "cuda")
+    monkeypatch.setenv("ML_DTYPE", "float16")
+
+    loaded = load_settings()
+
+    assert (loaded.ml.device, loaded.ml.dtype) == ("cuda", "float16")
+

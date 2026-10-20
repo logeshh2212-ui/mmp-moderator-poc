@@ -91,6 +91,7 @@ class ModelSettings(StrictModel):
 
 class MLSettings(StrictModel):
     device: Literal["cpu", "cuda"]  # "openvino" is added in Step 16c
+    dtype: Literal["float32", "float16"]
     num_threads: int = Field(ge=1)
     warmup: bool
     backbone: str | None
@@ -103,6 +104,13 @@ class MLSettings(StrictModel):
         if self.backbone is not None and self.backbone not in self.models:
             raise ValueError(f"ml.backbone '{self.backbone}' is not listed in ml.models")
         return self
+    
+    @model_validator(mode="after")
+    def float16_needs_a_gpu(self):
+        if self.dtype == "float16" and self.device == "cpu":
+            raise ValueError("ml.dtype float16 needs ml.device: cuda")
+        return self
+
 
 
 class TargetsSettings(StrictModel):
@@ -148,6 +156,10 @@ def load_settings(path: Path = CONFIG_FILE) -> AppSettings:
 
     # Environment variables can override the Redis URL.
     data["redis"]["url"] = os.getenv("REDIS_URL", data["redis"]["url"])
+    # The cloud GPU run (Step 16b) switches device and precision without editing this file.
+    data["ml"]["device"] = os.getenv("ML_DEVICE", data["ml"]["device"])
+    data["ml"]["dtype"] = os.getenv("ML_DTYPE", data["ml"]["dtype"])
+
 
     return AppSettings.model_validate(data)
 
