@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -219,6 +219,10 @@ class Gate2Signal(StrictModel):
     code: RejectionCode
     hard: bool = False
     review: bool = False
+    # points off other dimensions too (spec 4.4: drug use on an animal also hits D1)
+    also_deduct: dict[SafetyDimension, Annotated[float, Field(ge=0, le=100)]] = Field(
+        default_factory=dict
+    )
 
 
 class Gate2Context(StrictModel):
@@ -231,7 +235,6 @@ class Gate2Settings(StrictModel):
     version: str
     weights: dict[Dimension, float]
     thresholds: Gate2Thresholds
-    review_below: dict[Dimension, float]
     review_from_deduction: float = Field(gt=0, le=100)
     video_window_frames: int = Field(ge=1)
     code_priority: list[RejectionCode]

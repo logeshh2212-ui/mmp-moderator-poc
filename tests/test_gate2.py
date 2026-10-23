@@ -105,22 +105,22 @@ def test_minor_items_are_only_flagged(signal):
     assert signal in verdict.flags
 
 
-def test_off_topic_post_goes_to_a_human():
-    _, verdict = judge(frame(relevance=30))   # advert / political imagery (spec 4.6)
-    assert verdict.composite_score >= settings.gate2.thresholds.approve
-    assert verdict.decision == "HUMAN_REVIEW"
-    assert "low_D6_relevance" in verdict.flags
-
-
-def test_blank_picture_goes_to_a_human():
-    _, verdict = judge(frame(quality=0))
-    assert verdict.decision == "HUMAN_REVIEW"
-    assert "low_D5_quality" in verdict.flags
-
-
-def test_slightly_blurry_pet_is_still_approved():
-    _, verdict = judge(frame(quality=60))
+@pytest.mark.parametrize("quality, relevance", [(0, 100), (100, 0), (0, 0), (60, 100)])
+def test_quality_and_relevance_alone_never_hold_a_post(quality, relevance):
+    # decided: D5 / D6 are reported for other uses, they only move the composite
+    result, verdict = judge(frame(quality=quality, relevance=relevance))
     assert verdict.decision == "APPROVED"
+    assert result.dimensions["D5_quality"] == quality
+    assert result.dimensions["D6_relevance"] == relevance
+    assert verdict.composite_score == 80 + (quality + relevance) / 10
+
+
+def test_drug_use_on_animal_also_takes_d1():
+    result, verdict = judge(frame("item_drug_use_on_animal"))
+    assert result.dimensions["D4_prohibited"] == 0
+    assert result.dimensions["D1_welfare"] == 0
+    assert verdict.rejection_code == "MOD_006"
+    assert verdict.hard_reject is True
 
 
 # --- context exceptions (spec 7) ---

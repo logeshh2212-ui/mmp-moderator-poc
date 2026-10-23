@@ -285,11 +285,8 @@ gate2:
   thresholds:         # spec 3.3: >= approve -> APPROVED, >= review -> HUMAN_REVIEW, else REJECTED
     approve: 80
     review: 55
-  # D5 and D6 move the composite by at most 20 points, so on their own they can never
-  # reject or even hold a post. Spec 4.5 / 4.6 still send these to a human:
-  review_below:
-    D5_quality: 20      # blank frame, extreme compression (4.5)
-    D6_relevance: 55    # adverts, political imagery, spam (4.6)
+  # D5 and D6 move the composite by at most 20 points, so on their own they never reject or
+  # hold a post (decided 2026-10-23: the scores are reported and used elsewhere).
   # Weighted, one serious signal hardly moves the composite (visible drugs: D4 20 -> composite
   # 92 = APPROVED). Any single signal costing at least this many points (after contexts)
   # goes to a human. Our rule, not in the spec: founder to confirm.
@@ -331,7 +328,9 @@ gate2:
     # D4 prohibited items (4.4)
     item_firearm:                {dimension: D4_prohibited, deduction: 60, code: MOD_006}
     item_drugs:                  {dimension: D4_prohibited, deduction: 80, code: MOD_006}
-    item_drug_use_on_animal:     {dimension: D4_prohibited, deduction: 100, code: MOD_006, hard: true}
+    # spec: "-100 + D1 deduct"; drugging an animal is abuse, so D1 loses everything too
+    item_drug_use_on_animal:     {dimension: D4_prohibited, deduction: 100, code: MOD_006, hard: true,
+                                  also_deduct: {D1_welfare: 100}}
     item_weapon_knife:           {dimension: D4_prohibited, deduction: 40, code: MOD_006}
     item_alcohol:                {dimension: D4_prohibited, deduction: 10, code: MOD_006}
     item_tobacco:                {dimension: D4_prohibited, deduction: 10, code: MOD_006}

@@ -45,8 +45,6 @@ def decide(result: Gate2Result) -> Verdict:
         code = pick_code(codes) if codes else policy.low_score_code
         return Verdict("REJECTED", composite, code, flags=flags)
 
-    low = [d for d, bar in policy.review_below.items() if result.dimensions[d] < bar]
-    flags += [f"low_{d}" for d in low]
-    if composite < policy.thresholds.approve or result.review_signals or low:
+    if composite < policy.thresholds.approve or result.review_signals:
         return Verdict("HUMAN_REVIEW", composite, flags=flags)
     return Verdict("APPROVED", composite, flags=flags)

@@ -61,6 +61,8 @@ def frame_safety(frame: FrameSignals) -> tuple[dict[str, float], list[str], list
         signal = settings.gate2.signals[signal_id]
         deduction = signal_deduction(signal_id, frame.contexts)
         off[signal.dimension] += deduction
+        for dimension, extra in signal.also_deduct.items():  # never softened by a context
+            off[dimension] += extra
         if deduction > 0 or signal.hard:
             counted.append(signal_id)
             if not signal.hard and needs_review(signal_id, deduction, frame.contexts):
