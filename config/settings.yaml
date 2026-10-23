@@ -271,3 +271,81 @@ targets:   # spec MMP-MOD-2026-001, non-functional requirements
   image_p95_seconds: 3
   video_p95_seconds: 15
 
+
+gate2:
+  # Bump when the Gate 2 logic changes. Joins model_version when Gate 2 is wired in (step 2c).
+  version: gate2-engine-0.1
+  weights:            # spec 3.2; must add up to 1
+    D1_welfare: 0.25
+    D2_nsfw: 0.25
+    D3_violence: 0.20
+    D4_prohibited: 0.10
+    D5_quality: 0.10
+    D6_relevance: 0.10
+  thresholds:         # spec 3.3: >= approve -> APPROVED, >= review -> HUMAN_REVIEW, else REJECTED
+    approve: 80
+    review: 55
+  # D5 and D6 move the composite by at most 20 points, so on their own they can never
+  # reject or even hold a post. Spec 4.5 / 4.6 still send these to a human:
+  review_below:
+    D5_quality: 20      # blank frame, extreme compression (4.5)
+    D6_relevance: 55    # adverts, political imagery, spam (4.6)
+  # Weighted, one serious signal hardly moves the composite (visible drugs: D4 20 -> composite
+  # 92 = APPROVED). Any single signal costing at least this many points (after contexts)
+  # goes to a human. Our rule, not in the spec: founder to confirm.
+  review_from_deduction: 40
+  # spec 6.3: D1-D4 of a video = the worst average over any N consecutive frames
+  video_window_frames: 3
+  # spec 5.2: exactly one code per rejection; when several apply, the first in this list wins
+  code_priority: [MOD_008, MOD_001, MOD_003, MOD_002, MOD_009, MOD_004, MOD_005, MOD_006, MOD_007]
+  low_score_code: MOD_007   # composite too low and no safety signal to blame
+  # spec 4.1-4.4. Each of D1-D4 starts at 100; deduction = points off (minimum 0).
+  # hard: rejected whatever the composite. review: always at least HUMAN_REVIEW.
+  signals:
+    # D1 animal welfare (4.1)
+    welfare_distress:            {dimension: D1_welfare, deduction: 30, code: MOD_002}
+    welfare_painful_restraint:   {dimension: D1_welfare, deduction: 40, code: MOD_002}
+    welfare_wounds:              {dimension: D1_welfare, deduction: 50, code: MOD_002}
+    welfare_malnourished:        {dimension: D1_welfare, deduction: 25, code: MOD_002}
+    welfare_fighting:            {dimension: D1_welfare, deduction: 100, code: MOD_003, hard: true}
+    welfare_abuse:               {dimension: D1_welfare, deduction: 100, code: MOD_002, hard: true}
+    welfare_neglect:             {dimension: D1_welfare, deduction: 30, code: MOD_002}
+    welfare_graphic_dead:        {dimension: D1_welfare, deduction: 60, code: MOD_002}
+    welfare_killing:             {dimension: D1_welfare, deduction: 100, code: MOD_002, hard: true}
+    welfare_trafficking:         {dimension: D1_welfare, deduction: 80, code: MOD_009, hard: true}
+    # D2 adult / NSFW (4.2)
+    nsfw_partial_nudity:         {dimension: D2_nsfw, deduction: 10, code: MOD_004}
+    nsfw_sexual_human:           {dimension: D2_nsfw, deduction: 50, code: MOD_004}
+    nsfw_explicit_human:         {dimension: D2_nsfw, deduction: 100, code: MOD_004, hard: true}
+    nsfw_animal:                 {dimension: D2_nsfw, deduction: 100, code: MOD_004, hard: true}
+    nsfw_suggestive_overlay:     {dimension: D2_nsfw, deduction: 100, code: MOD_004, hard: true}
+    nsfw_explicit_text:          {dimension: D2_nsfw, deduction: 40, code: MOD_004}
+    # D3 violence and gore (4.3)
+    violence_minor_blood:        {dimension: D3_violence, deduction: 15, code: MOD_005}
+    violence_animal_gore:        {dimension: D3_violence, deduction: 60, code: MOD_005}
+    violence_human_gore:         {dimension: D3_violence, deduction: 50, code: MOD_005}
+    violence_weapon_pointed:     {dimension: D3_violence, deduction: 70, code: MOD_005}
+    violence_animal_fighting:    {dimension: D3_violence, deduction: 100, code: MOD_003, hard: true}
+    violence_human_on_animal:    {dimension: D3_violence, deduction: 100, code: MOD_002, hard: true}
+    violence_slaughter:          {dimension: D3_violence, deduction: 80, code: MOD_005, hard: true}
+    # D4 prohibited items (4.4)
+    item_firearm:                {dimension: D4_prohibited, deduction: 60, code: MOD_006}
+    item_drugs:                  {dimension: D4_prohibited, deduction: 80, code: MOD_006}
+    item_drug_use_on_animal:     {dimension: D4_prohibited, deduction: 100, code: MOD_006, hard: true}
+    item_weapon_knife:           {dimension: D4_prohibited, deduction: 40, code: MOD_006}
+    item_alcohol:                {dimension: D4_prohibited, deduction: 10, code: MOD_006}
+    item_tobacco:                {dimension: D4_prohibited, deduction: 10, code: MOD_006}
+  # spec 7 (and the 4.4 hunting exception). A context changes non-hard signals only:
+  # a hard reject is never softened. When two contexts set the same signal, the lower wins.
+  contexts:
+    medical:               # e-collar, stitches, clean bandages: treatment, not abuse
+      deductions: {welfare_wounds: 0}
+    rescue:                # injured stray being helped: D1 deductions halved
+      dimension_factor: {D1_welfare: 0.5}
+    raw_feeding:           # prey-model diet: -10 to -25 for blood, a human checks heavy blood
+      deductions: {violence_minor_blood: 10, violence_animal_gore: 25}
+      review_on: [violence_animal_gore]
+    peaceful_memorial:     # peaceful deceased pet: no welfare deduction for the pose itself
+      deductions: {welfare_graphic_dead: 0, welfare_distress: 0}
+    hunting:               # firearm in a hunting scene goes to a human
+      review_on: [item_firearm]

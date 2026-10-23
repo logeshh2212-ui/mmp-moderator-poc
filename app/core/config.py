@@ -6,6 +6,8 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.api.schemas import DimensionScores, RejectionCode
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILE = PROJECT_ROOT / "config" / "settings.yaml"
@@ -193,6 +195,69 @@ class Gate1Settings(StrictModel):
 
 
 
+DIMENSIONS = tuple(DimensionScores.model_fields)   # D1_welfare ... D6_relevance
+SafetyDimension = Literal["D1_welfare", "D2_nsfw", "D3_violence", "D4_prohibited"]
+Dimension = Literal[
+    "D1_welfare", "D2_nsfw", "D3_violence", "D4_prohibited", "D5_quality", "D6_relevance",
+]
+
+
+class Gate2Thresholds(StrictModel):
+    approve: float = Field(ge=0, le=100)
+    review: float = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def review_below_approve(self):
+        if self.review >= self.approve:
+            raise ValueError("gate2.thresholds.review must be below approve")
+        return self
+
+
+class Gate2Signal(StrictModel):
+    dimension: SafetyDimension
+    deduction: float = Field(ge=0, le=100)
+    code: RejectionCode
+    hard: bool = False
+    review: bool = False
+
+
+class Gate2Context(StrictModel):
+    deductions: dict[str, float] = Field(default_factory=dict)   # signal -> replacement deduction
+    dimension_factor: dict[SafetyDimension, float] = Field(default_factory=dict)
+    review_on: list[str] = Field(default_factory=list)
+
+
+class Gate2Settings(StrictModel):
+    version: str
+    weights: dict[Dimension, float]
+    thresholds: Gate2Thresholds
+    review_below: dict[Dimension, float]
+    review_from_deduction: float = Field(gt=0, le=100)
+    video_window_frames: int = Field(ge=1)
+    code_priority: list[RejectionCode]
+    low_score_code: RejectionCode
+    signals: dict[str, Gate2Signal]
+    contexts: dict[str, Gate2Context]
+
+    @model_validator(mode="after")
+    def policy_is_consistent(self):
+        if set(self.weights) != set(DIMENSIONS):
+            raise ValueError(f"gate2.weights needs exactly {list(DIMENSIONS)}")
+        if abs(sum(self.weights.values()) - 1) > 1e-6:
+            raise ValueError("gate2.weights must add up to 1")
+        if sorted(self.code_priority) != sorted(RejectionCode.__args__):
+            raise ValueError("gate2.code_priority must list every rejection code once")
+        for name, context in self.contexts.items():
+            named = set(context.deductions) | set(context.review_on)
+            unknown = named - set(self.signals)
+            if unknown:
+                raise ValueError(f"gate2.contexts.{name} names unknown signals: {sorted(unknown)}")
+            hard = sorted(s for s in named if self.signals[s].hard)
+            if hard:
+                raise ValueError(f"gate2.contexts.{name} cannot change hard-reject signals: {hard}")
+        return self
+
+
 class AppSettings(StrictModel):
     limits: LimitsSettings
     allowed_formats: FormatsSettings
@@ -209,6 +274,7 @@ class AppSettings(StrictModel):
     prepare: PrepareSettings
     ml: MLSettings
     gate1: Gate1Settings
+    gate2: Gate2Settings
     targets: TargetsSettings
 
 
