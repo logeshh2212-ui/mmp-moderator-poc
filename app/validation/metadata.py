@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -52,14 +53,15 @@ def clean(value) -> str | None:
 
 
 def generator_hints(*values: str | None) -> list[str]:
+    """Generator names as whole words only: "imagen" must not match the camera tag
+    "aux:ImageNumber" that Photoshop writes into XMP."""
     hints: list[str] = []
     for value in values:
         if not value:
             continue
-        lower = value.lower()
         for word in settings.metadata.ai_generator_keywords:
             hint = f"generator:{word}"
-            if word.lower() in lower and hint not in hints:
+            if re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", value, re.IGNORECASE) and hint not in hints:
                 hints.append(hint)
     return hints
 

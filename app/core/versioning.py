@@ -23,10 +23,22 @@ def decision_settings() -> dict:
             "model": ml.models[backbone].model_dump() if backbone else None,
             "detector": ml.models[ml.detector].model_dump() if ml.detector else None,
             "species_model": ml.models[ml.species_model].model_dump() if ml.species_model else None,
+            "nsfw_model": ml.models[ml.nsfw_model].model_dump() if ml.nsfw_model else None,
+            "ai_model": ml.models[ml.ai_model].model_dump() if ml.ai_model else None,
+            "ocr": ml.ocr,
+            "audio_model": ml.models[ml.audio_model].model_dump() if ml.audio_model else None,
+            "speech_model": ml.models[ml.speech_model].model_dump() if ml.speech_model else None,
             "prompts": ml.prompts,
         },
         "gate1": settings.gate1.model_dump(),
         "gate2": settings.gate2.model_dump(),
+        # the word lists' contents, not just their paths: editing a list changes decisions
+        "word_lists": {
+            str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in settings.gate2.text.blocklists + settings.gate2.text.allow
+        },
+        "ai_label": settings.ai_label.model_dump(),
+        "ai_generator_keywords": settings.metadata.ai_generator_keywords,
     }
 
 
@@ -49,6 +61,7 @@ def current_model_version() -> str:
         settings.model_version,
         settings.gate1.version,
         settings.gate2.version,
+        settings.ai_label.version,
         model,
         f"cfg{settings_fingerprint()}",
     ])

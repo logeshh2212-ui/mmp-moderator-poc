@@ -1,0 +1,39 @@
+# Words in the blocklists that are normal on a pet platform. Never counted.
+# bitch = female dog, cock = rooster, ass = donkey, tit / booby / shag = birds,
+# pussy(cat) = cat, beaver = animal, wiener = dachshund nickname.
+bitch
+bitches
+cock
+cocks
+ass
+asses
+tit
+tits
+titmouse
+booby
+boobies
+shag
+shags
+pussy
+pussycat
+pussycats
+beaver
+beavers
+wiener
+# sex = an animal's gender ("sexing rabbits"), humping = normal dog behaviour,
+# nipples = a mother nursing her litter, horny = horny toad (a lizard)
+sex
+sexing
+humping
+nipple
+nipples
+horny
+# Hinglish: dog, female dog, pig (the LDNOOBW Hindi list has them as insults)
+kutta
+kutte
+kuttey
+kutti
+kuttiya
+kutiya
+suar
+suwar

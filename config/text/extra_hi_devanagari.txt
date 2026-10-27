@@ -1,0 +1,4 @@
+# Hindi sexual / abusive words in Devanagari script, one per line (multi-word phrases allowed).
+# The LDNOOBW Hindi list (ldnoobw_hi.txt) is romanised Hinglish only, so Hindi text that
+# OCR or speech reads in Devanagari needs entries here. To be filled by the trust-and-safety
+# team (native speakers); lines starting with # are ignored.

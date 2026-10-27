@@ -1,12 +1,18 @@
+import hashlib
+import json
 import logging
 from time import perf_counter
 from uuid import uuid4
 
+import pytest
 from PIL import Image
 
+from app.core.config import SafetySettings, settings
 from app.pipeline import orchestrator
 from app.pipeline.context import ModerationContext
-from app.validation.csam import CsamResult, PlaceholderCsamChecker, get_csam_checker
+from app.validation.csam import (
+    CsamCheckError, CsamResult, HashListCsamChecker, PlaceholderCsamChecker, get_csam_checker,
+)
 
 
 class AlwaysMatches:
@@ -86,3 +92,81 @@ def test_invalid_file_never_reaches_csam_check(tmp_path, monkeypatch):
     orchestrator.run_pipeline(ctx)
 
     assert calls == []
+
+
+# --- quarantine: evidence is kept, not deleted ---
+
+def test_match_is_moved_to_quarantine_with_a_report_record(tmp_path, monkeypatch):
+    monkeypatch.setattr(orchestrator, "get_csam_checker", lambda: AlwaysMatches())
+    ctx = make_ctx(tmp_path)
+    upload = ctx.path
+
+    orchestrator.run_pipeline(ctx)
+
+    folder = settings.safety.quarantine_dir
+    assert not upload.exists()                                  # no longer in the temp folder
+    assert (folder / f"{ctx.content_id}.jpg").exists()
+    record = json.loads((folder / f"{ctx.content_id}.json").read_text())
+    assert record["sha256"] == "a" * 64 and record["provider"] == "fake"
+    assert "quarantined_at" in record
+
+
+# --- hash list provider (exact SHA-256 / MD5) ---
+
+def hash_list(tmp_path, *hashes):
+    path = tmp_path / "hashes.txt"
+    path.write_text("# test list: hashes of harmless generated files only\n" + "\n".join(hashes))
+    return path
+
+
+def test_hash_list_matches_by_sha256(tmp_path):
+    checker = HashListCsamChecker(hash_list(tmp_path, "B" * 64))
+
+    assert checker.check(tmp_path / "x.jpg", "b" * 64) == CsamResult(checked=True, match=True, provider="hash_list")
+    assert checker.check(tmp_path / "x.jpg", "c" * 64).match is False
+
+
+def test_hash_list_matches_by_md5_of_the_file(tmp_path):
+    upload = tmp_path / "x.jpg"
+    upload.write_bytes(b"harmless test bytes")
+    checker = HashListCsamChecker(hash_list(tmp_path, hashlib.md5(b"harmless test bytes").hexdigest()))
+
+    assert checker.check(upload, "c" * 64).match is True
+
+
+def test_unreadable_hash_list_stops_startup(tmp_path):
+    with pytest.raises(CsamCheckError):
+        HashListCsamChecker(tmp_path / "missing.txt")
+
+
+def test_placeholder_is_refused_when_a_real_check_is_required():
+    data = settings.safety.model_dump()
+    data["require_real_check"] = True
+    with pytest.raises(ValueError, match="placeholder"):
+        SafetySettings.model_validate(data)
+
+
+def test_hash_list_provider_needs_a_file():
+    data = settings.safety.model_dump()
+    data["csam_provider"] = "hash_list"
+    with pytest.raises(ValueError, match="hash_list_file"):
+        SafetySettings.model_validate(data)
+
+
+# --- the check cannot run: no decision, retry ---
+
+def test_failed_check_answers_503_and_is_not_cached(client, monkeypatch):
+    from tests.test_api import make_jpeg
+
+    class Broken:
+        def check(self, path, sha256):
+            raise CsamCheckError("provider timed out")
+
+    monkeypatch.setattr(orchestrator, "get_csam_checker", lambda: Broken())
+    data = make_jpeg()
+    post = lambda: client.post("/api/v1/moderate", files={"file": ("x.jpg", data, "image/jpeg")},  # noqa: E731
+                               data={"content_type": "image", "user_id": str(uuid4())})
+
+    assert post().status_code == 503
+    monkeypatch.setattr(orchestrator, "get_csam_checker", lambda: PlaceholderCsamChecker())
+    assert post().status_code == 200   # a retry is processed: the 503 was not stored

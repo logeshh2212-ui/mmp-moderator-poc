@@ -76,7 +76,7 @@ def test_pass_gets_all_six_dimensions_and_a_composite(tmp_path, with_model):
     assert scores.D6_relevance >= 85
     assert ctx.relevance[0].kind == "personal_moment"
     assert response.composite_score >= settings.gate2.thresholds.approve
-    assert "d1_d3_unchecked" in response.flags
+    assert "d1_d3_zero_shot" in response.flags
 
 
 def test_quality_uses_the_original_upload_size(tmp_path, with_model):
@@ -98,7 +98,7 @@ def test_off_topic_post_is_still_approved_but_scores_lower(tmp_path, with_model)
     assert response.dimension_scores.D6_relevance <= 40
 
 
-def test_gate1_failure_skips_gate2(tmp_path, with_model):
+def test_no_pet_is_answered_at_once_with_the_rest_null(tmp_path, with_model):
     with_model(FOOD)
     ctx = make_ctx(tmp_path)
 
@@ -106,7 +106,8 @@ def test_gate1_failure_skips_gate2(tmp_path, with_model):
 
     assert response.rejection_code == "MOD_001"
     assert response.dimension_scores is None and response.composite_score is None
-    assert ctx.gate2 is None
+    assert response.ai_generated is None and response.ai_score is None
+    assert ctx.gate2 is None and "gate2" not in ctx.timings      # Gate 2 never ran
 
 
 def test_borderline_still_goes_to_a_human_with_scores(tmp_path, with_model):
@@ -128,6 +129,22 @@ def test_gate2_hard_reject_rejects_the_post(tmp_path, with_model, detectors_see)
     assert response.rejection_code == "MOD_003"
     assert response.hard_reject is True
     assert "gate2_rejected" in response.flags
+
+
+HARD = sorted(s for s, cfg in settings.gate2.signals.items() if cfg.hard)
+
+
+@pytest.mark.parametrize("signal", HARD)
+def test_every_hard_signal_rejects_a_normal_pet_post(tmp_path, with_model, detectors_see, signal):
+    with_model(PERSONAL)
+    detectors_see(signal)
+
+    response = orchestrator.run_pipeline(make_ctx(tmp_path))
+
+    assert response.decision == "REJECTED"
+    assert response.rejection_code == settings.gate2.signals[signal].code
+    assert response.hard_reject is True
+    assert signal in response.flags
 
 
 def test_gate2_hard_reject_beats_gate1_borderline(tmp_path, with_model, detectors_see):

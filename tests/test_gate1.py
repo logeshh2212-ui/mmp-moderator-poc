@@ -8,11 +8,13 @@ from PIL import Image
 from app.core.config import settings
 from app.gates.gate1 import gate1_prompts, run_gate1
 from app.gates.relevance import relevance_prompts
+from app.gates.scene import scene_prompts
 from app.pipeline import orchestrator
 from app.pipeline.context import ModerationContext
 
-LABELS = list(gate1_prompts() | relevance_prompts())   # what the real backbone embeds
+LABELS = list(gate1_prompts() | relevance_prompts() | scene_prompts())   # what the real backbone embeds
 SCALE = 100.0  # like the real model (~113): small similarity gaps decide the score
+BIAS = -16.8   # the real model's logit bias: a 0.1 similarity is a yes-probability of ~0.001
 
 
 def row(**values) -> np.ndarray:
@@ -133,6 +135,7 @@ class FakeBackbone:
         self.values = values
         self.labels = LABELS
         self.scale = SCALE
+        self.bias = BIAS
 
     def embed_images(self, images):
         return np.zeros((len(images), 4), dtype=np.float32)
@@ -170,7 +173,7 @@ def test_pipeline_pass(tmp_path, with_model):
     response = orchestrator.run_pipeline(ctx)
 
     assert response.decision == "APPROVED"
-    assert response.flags == ["validation_passed", "gate1_passed", "d1_d3_unchecked"]
+    assert response.flags == ["validation_passed", "gate1_passed", "d1_d3_zero_shot"]
     assert response.pet_score >= 75
     assert ctx.gate1.outcome == "pass"
 
@@ -222,7 +225,7 @@ def test_pipeline_video_uses_every_frame(videos, with_model):
 
     response = orchestrator.run_pipeline(ctx)
 
-    assert response.flags == ["validation_passed", "gate1_passed", "d1_d3_unchecked"]
+    assert response.flags == ["validation_passed", "gate1_passed", "d1_d3_zero_shot"]
     assert len(ctx.gate1.frames) == len(ctx.prepared.frames)
     assert ctx.gate1.pass_fraction == 1.0
 
@@ -253,11 +256,14 @@ def test_mod_001_is_not_added_to_the_blocklist(tmp_path, with_model, blocklist):
     assert blocklist.count() == 0  # "no pet" is not harmful content
 
 
-def test_pass_stays_in_review_when_approve_on_pass_is_off(tmp_path, with_model, monkeypatch):
-    monkeypatch.setattr(settings.gate1, "approve_on_pass", False)
+def test_approval_without_the_zero_shot_flag(tmp_path, with_model, monkeypatch):
+    monkeypatch.setattr(settings.gate2, "flag_zero_shot", False)
     with_model(DOG)
 
-    assert orchestrator.run_pipeline(make_ctx(tmp_path)).decision == "HUMAN_REVIEW"
+    response = orchestrator.run_pipeline(make_ctx(tmp_path))
+
+    assert response.decision == "APPROVED"
+    assert response.flags == ["validation_passed", "gate1_passed"]
 
 
 def test_shadow_mode_never_approves(tmp_path, with_model, monkeypatch):

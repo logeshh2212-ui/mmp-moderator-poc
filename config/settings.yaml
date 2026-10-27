@@ -69,8 +69,18 @@ redis:
   socket_timeout_seconds: 2
 
 safety:
+  # Step 8b, before any model or person sees the file. placeholder = NOT checked (POC only);
+  # hash_list = exact SHA-256 / MD5 match against hash_list_file (from law enforcement /
+  # NCMEC hash sharing via trust-and-safety; never in the repo). PhotoDNA / Thorn Safer
+  # are added once the company has access. If a real check cannot run, the API answers 503
+  # (try again): nothing is moderated unchecked.
   csam_provider: placeholder
-  
+  require_real_check: false     # production: true (refuses to start with the placeholder)
+  hash_list_file: null
+  # A match is moved here with a JSON report record instead of being deleted (evidence for
+  # the legal report). Restricted access; never inside the repo.
+  quarantine_dir: 'D:\mmp-quarantine'
+
 blocklist:
   # 8 bands of 8 bits: any hash within 7 bits shares at least one band, so 7 is the maximum.
   max_distance: 6
@@ -96,6 +106,11 @@ ml:
   backbone: siglip2_base   # which SigLIP 2 the server loads; null = none
   detector: owlv2          # Gate 1 animal detector (finds WHERE an animal is); null = off
   species_model: bioclip2  # names the species in each animal box; null = off
+  nsfw_model: nsfw_vit     # Gate 2 D2: human nudity on the detector frames; null = off
+  ai_model: ai_smaug       # AI-generated label (ai_generated / ai_score); null = metadata only
+  ocr: true                # read text on images / video frames (gate2.text.ocr); false = off
+  audio_model: ast_audioset   # video sound events (spec 6.2); null = off
+  speech_model: whisper_base  # video speech to text (spec 6.2); whisper_small = better Hindi, slower; null = off
   batch_size: 16           # video frames per SigLIP pass
   models:
     siglip2_base:
@@ -114,6 +129,30 @@ ml:
       repo: imageomics/bioclip-2
       revision: 2957b322090f9cb17ae72c71981c7218a28d81e0
       licence: MIT
+    nsfw_vit:   # ViT-base image classifier, labels normal / nsfw (Gate 2 D2)
+      repo: Falconsai/nsfw_image_detection
+      revision: 96cb0d0342c7afb80cab76ecc58b265fa44da256
+      licence: Apache-2.0
+    ast_audioset:   # audio events (527 AudioSet labels: dog whimper, screaming, slap...) - spec 6.2
+      repo: MIT/ast-finetuned-audioset-10-10-0.4593
+      revision: f826b80d28226b62986cc218e5cec390b1096902
+      licence: BSD-3-Clause
+    whisper_base:   # speech to text (99 languages incl. Hindi) - spec 6.2 hate speech / verbal abuse
+      repo: openai/whisper-base
+      revision: e37978b90ca9030d5170a5c07aadb050351a65bb
+      licence: Apache-2.0
+    whisper_small:  # more accurate on Hindi, about 3x slower on CPU
+      repo: openai/whisper-small
+      revision: 973afd24965f72e36ca33b3055d56a652f456b4d
+      licence: Apache-2.0
+    ai_smaug:   # AI-generated label candidate: EmbeddingGemma-2 vision + classifier (repo code)
+      repo: abacusai/Smaug-AI-Image-Detector
+      revision: c7c95951e04a87b884a4ad479401b1128c3903bd
+      licence: Apache-2.0
+    ai_swin:    # AI-generated label candidate: Swin v2, labels artificial / real
+      repo: haywoodsloan/ai-image-detector-deploy
+      revision: 4ae1822603cb1ec980c217cfde1ef1b8e0477a16
+      licence: Apache-2.0
   # Step 16 sanity sentences. Step 17 replaces them with the Gate 1 set.
   # They are embedded once at startup; the text half of the model is then deleted.
   prompts:
@@ -131,10 +170,6 @@ gate1:
   # true = act on Gate 1 (MOD_001 rejections). false = shadow mode: compute and flag only,
   # decision stays HUMAN_REVIEW. The POC runs live; production can start in shadow mode.
   enforce: true
-  # POC only: the D1-D3 safety detectors (step 2e) do not exist yet, so D1-D3 are 100
-  # by default. true = a post Gate 2 approves is APPROVED (flagged d1_d3_unchecked);
-  # false = it waits for a human. Remove once D1-D3 are built (step 2f).
-  approve_on_pass: true
   thresholds:
     pass_photo: 75          # spec 2.2
     pass_illustrated: 60    # spec 2.3: drawings / cartoons
@@ -268,6 +303,16 @@ gate1:
     dolphin: marine_mammals
     whale: marine_mammals
 
+ai_label:
+  # Not in the spec: our own label (ai_generated / ai_score in the response). It never
+  # changes the decision. Metadata first (C2PA / IPTC "trained algorithmic media", Stable
+  # Diffusion PNG text, generator names in metadata.ai_generator_keywords) = certain;
+  # otherwise ml.ai_model on the original image or a few detector frames of a video.
+  version: ai-label-0.1
+  threshold: 0.9      # model probability from which ai_generated is true (set from the comparison)
+  crops: 3            # Smaug: 3 x 528 px crops at native resolution; 1 = centre only, 3x faster
+  video_frames: 3     # detector frames of a video the model looks at (start, middle, end)
+
 targets:   # spec MMP-MOD-2026-001, non-functional requirements
   image_p95_seconds: 3
   video_p95_seconds: 15
@@ -275,10 +320,15 @@ targets:   # spec MMP-MOD-2026-001, non-functional requirements
 
 gate2:
   # Bump when the Gate 2 logic changes. Part of model_version, like gate1.version.
-  version: gate2-0.3   # 0.3: D4 prohibited items (OWLv2 queries); 0.2: D5 + D6, wired in
-  # true = act on Gate 2 (rejections, reviews). false = shadow mode: scores are computed,
-  # reported and logged, but a Gate 2 rejection only adds the flag gate2_would_reject.
+  version: gate2-0.14  # 0.14: slaughterhouse / carcasses; 0.13: stick abuse + fetch safe sentences; 0.12: video audio (sounds + speech); 0.11: text on images (OCR + word lists); 0.10: nude art; 0.9: swimwear / shirtless with a pet; 0.8: real dog fights; 0.7: nudity sentences; 0.6: suggestive pose + spiked muzzle; 0.5: NSFW on detector frames only; 0.4: D1-D3; 0.3: D4 items; 0.2: D5 + D6
+  # true = act on Gate 2 (rejections, reviews, approvals). false = shadow mode: scores are
+  # computed, reported and logged, nothing is approved, and a Gate 2 rejection only adds
+  # the flag gate2_would_reject.
   enforce: true
+  # Approved posts carry the flag d1_d3_zero_shot while the D1-D3 detectors are zero-shot
+  # and their recall is unmeasured (decided 2026-10-27). Turn off once trust-and-safety
+  # data has measured them.
+  flag_zero_shot: true
   weights:            # spec 3.2; must add up to 1
     D1_welfare: 0.25
     D2_nsfw: 0.25
@@ -338,6 +388,10 @@ gate2:
     item_weapon_knife:           {dimension: D4_prohibited, deduction: 40, code: MOD_006}
     item_alcohol:                {dimension: D4_prohibited, deduction: 10, code: MOD_006}
     item_tobacco:                {dimension: D4_prohibited, deduction: 10, code: MOD_006}
+    # Audio of a video (6.2): "deduct 20 from D1", "audio-only issues do not trigger hard reject"
+    audio_distress:              {dimension: D1_welfare, deduction: 20, code: MOD_002}
+    audio_violence:              {dimension: D1_welfare, deduction: 20, code: MOD_002}
+    audio_abusive_speech:        {dimension: D1_welfare, deduction: 20, code: MOD_002}
   # spec 7 (and the 4.4 hunting exception). A context changes non-hard signals only:
   # a hard reject is never softened. When two contexts set the same signal, the lower wins.
   contexts:
@@ -460,3 +514,162 @@ gate2:
         sentences:
           - a political poster or protest sign
           - religious imagery with a symbol of faith
+  # D1 / D3 (and the animal and partial-nudity parts of D2) plus the spec 7 contexts,
+  # app/gates/scene.py. Zero-shot: SigLIP's own yes-probability per sentence, from the
+  # embedding Gate 1 already made. A harm sentence counts only when it reaches
+  # min_probability AND fits the picture better than every safe sentence (the safe list
+  # holds the look-alike everyday scenes: play fighting, cones, raw food, carriers...).
+  # Checked 2026-10-27 on 257 safe pictures (Gate 1 sets + video frames): highest harm
+  # probability with the veto was about 0.02, so 0.2 leaves a wide gap. Recall is NOT
+  # measured yet: positives only come through the trust-and-safety process.
+  scene:
+    min_probability: 0.2
+    context_min_probability: 0.1   # cone photos reached 0.6-0.7; safe photos at most 0.02
+    safe:
+      home: [a photo of a pet relaxing at home, a cute dog or cat indoors]
+      play: [two dogs playing together, puppies play fighting, kittens wrestling playfully,
+             a dog playing tug of war with a toy, a person throwing a stick for a dog to fetch,
+             a dog carrying a stick in its mouth]
+      outdoor: [a dog on a walk in the park, a pet outdoors in nature]
+      sleep: [a pet sleeping peacefully, a cat curled up asleep]
+      care: [a dog wearing a cone collar after surgery, a pet at the vet for a checkup,
+             a dog with a bandage on its leg, a pet being groomed, a dog having a bath]
+      food: [a dog eating from its food bowl, a dog eating raw meat and bones]
+      costume: [a pet wearing a costume, a dog in a sweater]
+      people: [a person gently holding a tiny kitten, a hand petting a cat, a person hugging their dog,
+               a child playing with a cat, a person holding a pet]
+      gear: [a dog resting in its crate, a dog on a leash, a dog wearing a muzzle on a walk]
+      babies: [newborn kittens with their eyes closed, a mother cat with her kittens, newborn puppies]
+      transport: [a closed pet carrier, a pet in a travel carrier, a pet shop display]
+      portrait: [a close-up portrait of a pet, a studio photo of a pet]
+      other_animals: [a bird, a fish in an aquarium, a horse in a field, a reptile in a terrarium,
+                      a wild animal in nature]
+      no_animal: [a landscape, food on a plate, a room with furniture, a person]
+    harm:
+      distress:
+        signals: [welfare_distress]
+        sentences: [a frightened animal cowering in fear, an animal in distress]
+      restraint:   # spiked muzzle: 0.37 on a missed fetish-style upload (2026-10-27), 0.000 on safe
+        signals: [welfare_painful_restraint]
+        sentences: [an animal tied up tightly with rope, a dog with its mouth taped shut,
+                    a dog in a spiked muzzle and spiked harness]
+      wounds:
+        signals: [welfare_wounds]
+        sentences: [an animal with open bleeding wounds, an injured animal with a deep wound]
+      malnourished:
+        signals: [welfare_malnourished]
+        sentences: [a starving emaciated dog with visible ribs, a very thin malnourished animal]
+      fighting:
+        signals: [welfare_fighting, violence_animal_fighting]
+        # a real fight outside a pit was missed (2026-10-27): the pit sentence lost to the
+        # safe "puppies play fighting"; these two gave 0.88 / 0.82 on it, safe pictures <= 0.002
+        sentences: [two dogs fighting viciously in a fighting pit, a cockfight,
+                    organised animal fighting with people betting, a vicious dog fight,
+                    dogs snarling and attacking each other]
+      abuse:   # "someone hurting a cat" was too vague: 0.30 on a kitten held in a hand
+        signals: [welfare_abuse, violence_human_on_animal]
+        # stick abuse missed 2026-10-28 (stock photo, raised stick over a held-down dog):
+        # these gave 0.98 / 0.96 / 0.89 on it, safe pictures <= 0.018; fetch is in the safe list
+        sentences: [a person kicking a dog, a person beating an animal, a person hitting a cat,
+                    a person threatening a dog with a stick, a person beating a dog with a stick,
+                    a person raising a stick to hit a dog]
+      neglect:
+        signals: [welfare_neglect]
+        sentences: [a dirty neglected dog chained in filth, an animal locked in a filthy cage]
+      dead:
+        signals: [welfare_graphic_dead]
+        sentences: [a dead animal lying on the road, an animal carcass]
+      slaughter:
+        signals: [welfare_killing, violence_slaughter]
+        # a slaughterhouse full of hanging carcasses was approved (2026-10-28): the last three
+        # gave 0.71 / 0.39 / 0.32 on it, safe pictures <= 0.003
+        sentences: [an animal being slaughtered, killing an animal,
+                    a meat processing plant with animal carcasses, a slaughterhouse, an abattoir]
+      trafficking:
+        signals: [welfare_trafficking]
+        sentences: [many puppies crammed into small cages for sale, exotic animals smuggled in boxes]
+      gore:
+        signals: [violence_animal_gore]
+        sentences: [a gory bloody animal carcass, animal intestines and blood]
+      human_gore:
+        signals: [violence_human_gore]
+        sentences: [a bloody injured person, human gore]
+      minor_blood:
+        signals: [violence_minor_blood]
+        sentences: ["a small amount of blood on an animal's fur", a pet with a little blood on it]
+      weapon_pointed:
+        signals: [violence_weapon_pointed]
+        sentences: [a person pointing a gun at an animal, "a knife held to an animal's throat"]
+      drug_use:
+        signals: [item_drug_use_on_animal]
+        sentences: ["a person blowing smoke into a dog's face", an animal being given drugs]
+      nsfw_animal:
+        signals: [nsfw_animal]
+        sentences: [sexual content involving an animal]
+      # A sexualised pose with an animal but no nudity: the NSFW model gave 0.005 and the
+      # lingerie / "suggestive" sentences ~0.0002 on the missed upload; this one gave 0.87
+      # (safe pictures at most 0.025). "fetish photo shoot" was dropped: 0.75 on an empty dog bed.
+      suggestive:
+        signals: [nsfw_sexual_human]
+        sentences: [a glamour model posing with a dog]
+      # Full non-sexual nudity (not in the spec's list): a human decides. The NSFW model
+      # missed it (0.000 on the frame, 0.02 on a person crop: trained on sexual content).
+      # Missed upload 2026-10-27: 0.87 / 0.68 / 0.52; safe pictures at most 0.10 / 0.04 / 0.001.
+      nudity:
+        signals: [nsfw_sexual_human]
+        # nude art (a painting was approved): 0.998 / 0.54 / 0.32 on it, safe pictures <= 0.012
+        sentences: [a naked person with a pet, a nude person with an animal, a fully nude person outdoors,
+                    a painting of a nude woman with a dog, a painting of a naked person with an animal,
+                    an artwork showing a naked woman]
+      partial_nudity:   # -10, approved with a flag. "... with a dog/pet" added 2026-10-27: SigLIP
+        # gave 0.00-0.03 for plain "bikini" / "shirtless" on two beach and street uploads, 0.43-0.93
+        # with the pet in the sentence; safe pictures at most 0.005.
+        signals: [nsfw_partial_nudity]
+        sentences: [a person in a bikini or swimwear, a shirtless man, a person in a bikini with a dog,
+                    a woman in swimwear with a pet, a shirtless person with a pet]
+    contexts:
+      medical: [a dog wearing a cone collar, a pet with a bandage at the vet, a pet with stitches after surgery]
+      rescue: [an injured stray animal being rescued, a rescuer helping a hurt animal]
+      raw_feeding: [a dog eating raw meat, a raw food diet for a dog with raw chicken]
+      peaceful_memorial: [a memorial photo of a pet that passed away, a deceased pet resting peacefully with flowers]
+      hunting: [a hunting dog with a hunter in the field, a hunter with a rifle and his dog]
+  # D2 human nudity: ml.nsfw_model (normal / nsfw) on the frames the detector looked at
+  # (all 8 on a video; decided 2026-10-27: ~2 s instead of ~13 s on CPU, a short moment
+  # between those frames can be missed). On 189 safe photos
+  # its highest nsfw probability was 0.14 (a balloon dog). Not in the list = below every level.
+  nsfw:
+    label: nsfw
+    levels:
+      nsfw_explicit_human: 0.95   # hard reject
+      nsfw_sexual_human: 0.8      # -50: a human checks it (review_from_deduction)
+  # Spec 4.2 "text overlay with explicit sexual language" (-40, so a human checks it) and
+  # section 7 (memes are fine unless the text itself violates). app/gates/text.py: whole
+  # words / phrases from the lists, minus the pet-platform allow list. The same lists check
+  # speech in video audio. See config/text/README.md for sources and licences.
+  text:
+    signal: nsfw_explicit_text
+    blocklists: [config/text/ldnoobw_en.txt, config/text/ldnoobw_hi.txt, config/text/extra_hi_devanagari.txt]
+    allow: [config/text/allow_pet_words.txt]
+    ocr:   # EasyOCR (Apache-2.0); weights from scripts.download_models, never at request time
+      languages: [en, hi]
+      model_dir: 'D:\easyocr-models'
+      min_confidence: 0.4
+      video_frames: 3      # detector frames of a video that are read (start, middle, end)
+  # Spec 6.2: the audio track of a video (app/gates/audio.py). Sounds from ml.audio_model
+  # (AudioSet labels, highest score in any chunk); speech from ml.speech_model, checked with
+  # the text word lists above. Videos without audio, and images, skip this.
+  audio:
+    sample_rate: 16000
+    chunk_seconds: 10
+    sounds:
+      audio_distress:    # animal distress: yelping, whimpering, screaming, caterwauling
+        labels: ["Whimper (dog)", "Whimper", "Caterwaul", "Screaming", "Squeal", "Crying, sobbing"]
+        min_score: 0.3
+      audio_violence:    # sounds of violence or impact
+        labels: ["Slap, smack", "Whack, thwack", "Smash, crash", "Breaking", "Gunshot, gunfire"]
+        min_score: 0.3
+    speech_signal: audio_abusive_speech
+    # Whisper only runs when the sound model hears speech: on music or a test tone it took
+    # 60-181 s on the laptop CPU and invented 900-2600 characters of text (2026-10-27).
+    speech_label: Speech
+    speech_min_score: 0.5

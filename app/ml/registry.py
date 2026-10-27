@@ -59,10 +59,11 @@ def load_models() -> None:
     if settings.ml.backbone:
         from app.gates.gate1 import gate1_prompts
         from app.gates.relevance import relevance_prompts
+        from app.gates.scene import scene_prompts
         from app.ml.siglip import SiglipEmbedder
 
         # The text half is dropped after these are embedded: every sentence is needed here.
-        prompts = gate1_prompts() | relevance_prompts()
+        prompts = gate1_prompts() | relevance_prompts() | scene_prompts()
         registry.register(SiglipEmbedder(settings.ml.backbone, prompts=prompts))
     species = list(settings.gate1.species)
     if settings.ml.detector:
@@ -76,6 +77,25 @@ def load_models() -> None:
         from app.ml.bioclip import BioclipClassifier
 
         registry.register(BioclipClassifier(settings.ml.species_model, species=species))
+    if settings.ml.nsfw_model:
+        from app.ml.classifier import ImageClassifier
+
+        registry.register(ImageClassifier(settings.ml.nsfw_model, label=settings.gate2.nsfw.label))
+    if settings.ml.ai_model:
+        from app.ml.smaug import SmaugDetector
+
+        registry.register(SmaugDetector(settings.ml.ai_model))
+    if settings.ml.ocr:
+        from app.ml.ocr import OcrReader
+
+        registry.register(OcrReader())
+    if settings.ml.audio_model or settings.ml.speech_model:
+        from app.ml.audio import AudioEvents, SpeechToText
+
+        if settings.ml.audio_model:
+            registry.register(AudioEvents(settings.ml.audio_model))
+        if settings.ml.speech_model:
+            registry.register(SpeechToText(settings.ml.speech_model))
     registry.load_all()
 
 
@@ -98,3 +118,28 @@ def get_detector():
 def get_species_model():
     """The loaded species model (BioCLIP 2), or None."""
     return _ready(settings.ml.species_model)
+
+
+def get_nsfw_model():
+    """The loaded NSFW classifier (Gate 2 D2), or None."""
+    return _ready(settings.ml.nsfw_model)
+
+
+def get_ai_model():
+    """The loaded AI-generated image detector, or None."""
+    return _ready(settings.ml.ai_model)
+
+
+def get_ocr():
+    """The loaded text reader (EasyOCR), or None."""
+    return _ready("ocr" if settings.ml.ocr else None)
+
+
+def get_audio_model():
+    """The loaded sound-event model (AST / AudioSet), or None."""
+    return _ready(settings.ml.audio_model)
+
+
+def get_speech_model():
+    """The loaded speech-to-text model (Whisper), or None."""
+    return _ready(settings.ml.speech_model)

@@ -4,13 +4,16 @@ from typing import Annotated, Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.schemas import DimensionScores, RejectionCode
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILE = PROJECT_ROOT / "config" / "settings.yaml"
+# Files in model repos we never download or need: duplicate .bin / TensorFlow / Flax / ONNX
+# copies of the .safetensors weights, and leftover training checkpoints.
+MODEL_IGNORE_PATTERNS = ["*.bin", "*.pt", "*.h5", "*.msgpack", "*.onnx", "checkpoint-*/*"]
 load_dotenv(PROJECT_ROOT / ".env")
 
 
@@ -68,8 +71,20 @@ class LoggingSettings(StrictModel):
 
 
 class SafetySettings(StrictModel):
-    # Only "placeholder" exists today. A typo here stops the app at startup.
-    csam_provider: Literal["placeholder"]
+    # placeholder = no real check (POC); hash_list = exact SHA-256 / MD5 matches against a
+    # hash file from an official source. PhotoDNA / Thorn Safer are added once there is access.
+    csam_provider: Literal["placeholder", "hash_list"]
+    require_real_check: bool        # production: refuse to start with the placeholder
+    hash_list_file: Path | None     # hash_list: one hex hash per line, kept OUTSIDE the repo
+    quarantine_dir: Path            # matched files and their report records (restricted access)
+
+    @model_validator(mode="after")
+    def provider_is_usable(self):
+        if self.require_real_check and self.csam_provider == "placeholder":
+            raise ValueError("safety.require_real_check is on but csam_provider is the placeholder")
+        if self.csam_provider == "hash_list" and self.hash_list_file is None:
+            raise ValueError("safety.csam_provider hash_list needs safety.hash_list_file")
+        return self
 
 class BlocklistSettings(StrictModel):
     max_distance: int = Field(ge=0, le=7)
@@ -99,13 +114,18 @@ class MLSettings(StrictModel):
     backbone: str | None
     detector: str | None
     species_model: str | None
+    nsfw_model: str | None
+    ai_model: str | None
+    ocr: bool                       # read text on images / video frames (gate2.text.ocr)
+    audio_model: str | None         # video sound events (gate2.audio)
+    speech_model: str | None        # video speech to text (gate2.audio)
     batch_size: int = Field(ge=1)
     models: dict[str, ModelSettings]
     prompts: dict[str, str]
 
     @model_validator(mode="after")
     def chosen_models_are_listed(self):
-        for role in ("backbone", "detector", "species_model"):
+        for role in ("backbone", "detector", "species_model", "nsfw_model", "ai_model", "audio_model", "speech_model"):
             name = getattr(self, role)
             if name is not None and name not in self.models:
                 raise ValueError(f"ml.{role} '{name}' is not listed in ml.models")
@@ -160,7 +180,6 @@ class Gate1FusionSettings(StrictModel):
 class Gate1Settings(StrictModel):
     version: str
     enforce: bool
-    approve_on_pass: bool
     thresholds: Gate1Thresholds
     video_min_pass_fraction: float = Field(gt=0, le=1)
     score_scale: float = Field(gt=0)
@@ -284,9 +303,66 @@ class Gate2RelevanceSettings(StrictModel):
     kinds: dict[str, Gate2RelevanceKind] = Field(min_length=2)
 
 
+class OcrSettings(StrictModel):
+    languages: list[str] = Field(min_length=1)   # EasyOCR codes, e.g. en, hi
+    model_dir: Path                              # EasyOCR weights (downloaded by scripts.download_models)
+    min_confidence: float = Field(ge=0, le=1)    # text boxes below this are ignored
+    video_frames: int = Field(ge=1)              # detector frames of a video that are read
+
+
+class Gate2TextSettings(StrictModel):
+    signal: str                   # gate2 signal for a listed word in on-screen text or speech
+    blocklists: list[Path] = Field(min_length=1)   # relative to the project folder
+    allow: list[Path]             # words that are normal on a pet platform (bitch, cock...)
+    ocr: OcrSettings
+
+    @field_validator("blocklists", "allow")
+    @classmethod
+    def files_exist(cls, paths):
+        resolved = [p if p.is_absolute() else PROJECT_ROOT / p for p in paths]
+        missing = [str(p) for p in resolved if not p.is_file()]
+        if missing:
+            raise ValueError(f"word list files not found: {missing}")
+        return resolved
+
+
+class Gate2SoundGroup(StrictModel):
+    labels: list[str] = Field(min_length=1)    # AudioSet label names, exactly as the model has them
+    min_score: float = Field(gt=0, lt=1)
+
+
+class Gate2AudioSettings(StrictModel):
+    sample_rate: int = Field(gt=0)
+    chunk_seconds: float = Field(gt=0)
+    sounds: dict[str, Gate2SoundGroup]          # gate2 signal -> the sounds that raise it
+    speech_signal: str                          # a listed word in the speech
+    speech_label: str                           # AudioSet label that means someone is talking
+    speech_min_score: float = Field(gt=0, lt=1) # Whisper runs only from this score (or with no sound model)
+
+
+class Gate2HarmIdea(StrictModel):
+    signals: list[str] = Field(min_length=1)    # gate2.signals this scene stands for
+    sentences: list[str] = Field(min_length=1)
+
+
+class Gate2SceneSettings(StrictModel):
+    min_probability: float = Field(gt=0, lt=1)           # SigLIP yes-probability for a harm sentence
+    context_min_probability: float = Field(gt=0, lt=1)   # same for a context sentence
+    safe: dict[str, list[str]] = Field(min_length=1)     # ordinary scenes a harm sentence must beat
+    harm: dict[str, Gate2HarmIdea] = Field(min_length=1)
+    contexts: dict[str, list[str]]                       # gate2.contexts name -> sentences
+
+
+class Gate2NsfwSettings(StrictModel):
+    label: str                       # the model's label for nudity
+    # D2 signal -> probability from which it counts; the highest level reached wins
+    levels: dict[str, Annotated[float, Field(gt=0, lt=1)]] = Field(min_length=1)
+
+
 class Gate2Settings(StrictModel):
     version: str
     enforce: bool
+    flag_zero_shot: bool
     weights: dict[Dimension, float]
     thresholds: Gate2Thresholds
     review_from_deduction: float = Field(gt=0, le=100)
@@ -298,6 +374,10 @@ class Gate2Settings(StrictModel):
     quality: Gate2QualitySettings
     items: Gate2ItemsSettings
     relevance: Gate2RelevanceSettings
+    scene: Gate2SceneSettings
+    nsfw: Gate2NsfwSettings
+    text: Gate2TextSettings
+    audio: Gate2AudioSettings
 
     @model_validator(mode="after")
     def policy_is_consistent(self):
@@ -320,7 +400,29 @@ class Gate2Settings(StrictModel):
                 signal not in self.signals or self.signals[signal].dimension != "D4_prohibited"
             ):
                 raise ValueError(f"gate2.items.queries.{query}: {signal} is not a D4 signal")
+        for idea, harm in self.scene.harm.items():
+            unknown = set(harm.signals) - set(self.signals)
+            if unknown:
+                raise ValueError(f"gate2.scene.harm.{idea} names unknown signals: {sorted(unknown)}")
+        unknown = set(self.scene.contexts) - set(self.contexts)
+        if unknown:
+            raise ValueError(f"gate2.scene.contexts names unknown contexts: {sorted(unknown)}")
+        if self.text.signal not in self.signals:
+            raise ValueError(f"gate2.text.signal: unknown signal {self.text.signal}")
+        for signal in [*self.audio.sounds, self.audio.speech_signal]:
+            if signal not in self.signals or self.signals[signal].hard:
+                raise ValueError(f"gate2.audio: {signal} must be a known, non-hard signal (spec 6.2)")
+        for signal in self.nsfw.levels:
+            if signal not in self.signals or self.signals[signal].dimension != "D2_nsfw":
+                raise ValueError(f"gate2.nsfw.levels: {signal} is not a D2 signal")
         return self
+
+
+class AiLabelSettings(StrictModel):
+    version: str
+    threshold: float = Field(gt=0, lt=1)   # model probability from which ai_generated is true
+    crops: Literal[1, 3]                   # Smaug: 3 crops = most accurate, 1 = 3x faster
+    video_frames: int = Field(ge=1)        # detector frames of a video the model looks at
 
 
 class AppSettings(StrictModel):
@@ -340,6 +442,7 @@ class AppSettings(StrictModel):
     ml: MLSettings
     gate1: Gate1Settings
     gate2: Gate2Settings
+    ai_label: AiLabelSettings
     targets: TargetsSettings
 
 

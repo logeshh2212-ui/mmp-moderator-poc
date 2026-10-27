@@ -17,14 +17,20 @@ def no_real_models(monkeypatch):
     monkeypatch.setattr(settings.ml, "backbone", None)
     monkeypatch.setattr(settings.ml, "detector", None)
     monkeypatch.setattr(settings.ml, "species_model", None)
+    monkeypatch.setattr(settings.ml, "nsfw_model", None)
+    monkeypatch.setattr(settings.ml, "ai_model", None)
+    monkeypatch.setattr(settings.ml, "ocr", False)
+    monkeypatch.setattr(settings.ml, "audio_model", None)
+    monkeypatch.setattr(settings.ml, "speech_model", None)
     yield
     registry.clear()
 
 
 @pytest.fixture(autouse=True)
 def temp_dir(tmp_path, monkeypatch):
-    """Every test writes uploads to its own empty folder."""
+    """Every test writes uploads (and any quarantined file) to its own empty folder."""
     monkeypatch.setattr(settings, "temp_dir", tmp_path)
+    monkeypatch.setattr(settings.safety, "quarantine_dir", tmp_path / "quarantine")
     return tmp_path
 
 

@@ -4,21 +4,32 @@ from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
 
+from PIL import Image
+
 from app.api.schemas import DimensionScores, ModerationResponse
 from app.cache.blocklist import get_blocklist
 from app.core.config import settings
 from app.core.logging import log_result
 from app.decision.engine import decide
+from app.gates.ai_label import ai_label
+from app.gates.audio import audio_signals
+from app.prepare.audio import load_audio
 from app.gates.detection import detect_animals, detector_frame_indices
 from app.gates.gate1 import run_gate1
 from app.gates.gate2 import FrameSignals, score_gate2
 from app.gates.items import item_signals
+from app.gates.nsfw import nsfw_signals
 from app.gates.quality import frame_quality, jpeg_quality
 from app.gates.relevance import score_relevance
-from app.ml.registry import get_backbone, get_detector, get_species_model
+from app.gates.scene import SceneResult, score_scene
+from app.gates.text import text_hits, text_signals
+from app.ml.registry import (
+    get_ai_model, get_audio_model, get_backbone, get_detector, get_nsfw_model, get_ocr, get_species_model,
+    get_speech_model,
+)
 from app.pipeline.context import ModerationContext
 from app.prepare import prepare_media
-from app.validation.csam import get_csam_checker
+from app.validation.csam import get_csam_checker, quarantine
 from app.validation.errors import ValidationFailure
 from app.validation.formats import check_format
 from app.validation.hashing import phash_image, phash_png_bytes
@@ -84,8 +95,11 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
             phash = ctx.validation.phash
             ctx.blocklist_match = get_blocklist().find(phash) if phash else None
     if ctx.csam.match:
-        # A real provider will also move the file to restricted quarantine
-        # storage and start legal reporting before the temp file is deleted.
+        # Kept as evidence for the legal report (not deleted); no model ever sees it.
+        ctx.path = quarantine(ctx.path, {
+            "content_id": ctx.content_id, "user_id": ctx.user_id, "sha256": ctx.sha256,
+            "provider": ctx.csam.provider, "content_type": ctx.content_type, "size_bytes": ctx.size_bytes,
+        })
         ctx.reject("MOD_004", "quarantined", hard=True)
         return finish(ctx)
     if ctx.blocklist_match:
@@ -117,13 +131,74 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
             return finish(ctx)
         run_gate1_branches(ctx, backbone)
         apply_gate1(ctx)
-        # Gate 2 (spec 3-5) for everything Gate 1 did not rule out.
-        if ctx.gate1.outcome != "fail":
-            run_gate2(ctx, backbone)
-            apply_gate2(ctx)
+        if ctx.gate1.outcome == "fail":
+            # No pet: answer at once (decided 2026-10-28). Same response fields, with the
+            # Gate 2 scores and the AI label left null (not measured).
+            return finish(ctx)
+        run_gate2(ctx, backbone)
+        apply_gate2(ctx)
 
-    # Later phases each add one call here (AI label, audit log).
+    # AI-generated label (not in the spec): never decides.
+    run_ai_label(ctx)
+
+    # Later phases each add one call here (audit log).
     return finish(ctx)
+
+
+def run_audio(ctx: ModerationContext) -> None:
+    """Spec 6.2: sounds and speech of a video. A missing model is flagged, never blocking."""
+    sounds_model, speech_model = get_audio_model(), get_speech_model()
+    for configured, model, flag in ((settings.ml.audio_model, sounds_model, "audio_unavailable"),
+                                    (settings.ml.speech_model, speech_model, "speech_unavailable")):
+        if configured and model is None:
+            ctx.flags.append(flag)
+    if sounds_model is None and speech_model is None:
+        return
+    with timed(ctx, "audio"):
+        wave = load_audio(ctx.path)
+        if wave is None:
+            ctx.flags.append("audio_unreadable")
+            return
+        scores = sounds_model.scores(wave) if sounds_model else None
+        cfg = settings.gate2.audio
+        talking = scores is None or scores.get(cfg.speech_label, 0.0) >= cfg.speech_min_score
+        transcript = speech_model.transcribe(wave) if speech_model and talking else None
+    ctx.audio = audio_signals(scores, transcript)
+
+
+def spread_frames(ctx: ModerationContext, wanted: int) -> list[int]:
+    """Up to `wanted` of the detector frames (all frames without a detector), spread from
+    the start to the end of the video. An image has one frame."""
+    indices = sorted(ctx.detections) or list(range(len(ctx.prepared.frames)))
+    wanted = min(wanted, len(indices))
+    picks = [indices[round(i * (len(indices) - 1) / max(wanted - 1, 1))] for i in range(wanted)]
+    return list(dict.fromkeys(picks))
+
+
+def ai_label_pictures(ctx: ModerationContext) -> list:
+    """The original image (the model wants native resolution), or a few detector frames
+    of a video spread from start to end."""
+    if ctx.content_type == "image":
+        with Image.open(ctx.path) as img:
+            img.load()
+            return [img]
+    return [ctx.prepared.frames[i].detector for i in spread_frames(ctx, settings.ai_label.video_frames)]
+
+
+def run_ai_label(ctx: ModerationContext) -> None:
+    hints = ctx.validation.metadata.ai_hints
+    probabilities = None
+    model = get_ai_model()
+    if hints:
+        pass  # the file says it was AI-made (C2PA / IPTC / generator name): no model needed
+    elif model is not None:
+        with timed(ctx, "ai_label"):
+            probabilities = model.probability(ai_label_pictures(ctx))
+    elif settings.ml.ai_model:
+        ctx.flags.append("ai_label_unavailable")  # failed to load: metadata only
+    label = ai_label(hints, probabilities)
+    ctx.ai_generated, ctx.ai_score = label.generated, label.score
+    ctx.flags += label.flags
 
 
 def run_gate1_branches(ctx: ModerationContext, backbone) -> None:
@@ -177,8 +252,31 @@ def source_info(ctx: ModerationContext) -> tuple[int, float | None]:
 
 
 def run_gate2(ctx: ModerationContext, backbone) -> None:
-    """D4 items from Gate 1's detector boxes, D5 on every frame (on Gate 1's pet box where
-    the detector looked) and D6 from the SigLIP embeddings. D1-D3 arrive in step 2e."""
+    """D1-D3 scenes and D6 from the SigLIP embeddings, human nudity from the NSFW model
+    and D4 items on the frames the detector looked at, D5 on every frame (on Gate 1's
+    pet box where the detector looked)."""
+    nsfw = get_nsfw_model()
+    if nsfw is not None:
+        # decided: the detector frames only (8 per video), every frame without a detector
+        indices = sorted(ctx.detections) or range(len(ctx.prepared.frames))
+        with timed(ctx, "nsfw"):
+            found = nsfw.probability([ctx.prepared.frames[i].backbone for i in indices])
+        ctx.nsfw = dict(zip(indices, found))
+    elif settings.ml.nsfw_model:
+        ctx.flags.append("nsfw_unavailable")  # failed to load: never approve without it
+
+    ocr = get_ocr()
+    if ocr is not None:
+        picks = spread_frames(ctx, settings.gate2.text.ocr.video_frames)
+        with timed(ctx, "ocr"):
+            texts = ocr.read([ctx.prepared.frames[i].detector for i in picks])
+        ctx.ocr_text = dict(zip(picks, texts))
+    elif settings.ml.ocr:
+        ctx.flags.append("ocr_unavailable")  # text is not read; the rest still decides
+
+    if ctx.content_type == "video" and ctx.validation.video.has_audio:
+        run_audio(ctx)
+
     with timed(ctx, "gate2"):
         short_side, jpeg_q = source_info(ctx)
         for i, frame in enumerate(ctx.prepared.frames):
@@ -189,15 +287,24 @@ def run_gate2(ctx: ModerationContext, backbone) -> None:
         sims = backbone.similarities(ctx.embeddings)
         ctx.relevance = score_relevance(sims, backbone.labels, backbone.scale) or []
         relevance = [r.score for r in ctx.relevance] or [None] * len(ctx.quality)
+        ctx.scene = score_scene(sims, backbone.labels, backbone.scale, backbone.bias) or []
+        scenes = ctx.scene or [SceneResult() for _ in ctx.quality]
 
-        # D4 items: only on the frames the detector looked at (images: the one frame)
-        signals = [
-            item_signals(ctx.detections[i].items) if i in ctx.detections else set()
-            for i in range(len(ctx.quality))
-        ]
+        signals = []
+        for i, scene in enumerate(scenes):
+            found = set(scene.signals)
+            if i in ctx.detections:  # D4 items: only where the detector looked (images: the one frame)
+                found |= item_signals(ctx.detections[i].items)
+            if i in ctx.nsfw:
+                found |= nsfw_signals(ctx.nsfw[i])
+            if i in ctx.ocr_text:  # text on the picture (meme captions, overlays)
+                found |= text_signals(ctx.ocr_text[i])
+            if ctx.audio:  # spec 6.2: the soundtrack belongs to every moment of the video
+                found |= ctx.audio.signals
+            signals.append(found)
         frames = [
-            FrameSignals(signals=s, quality=q.score, relevance=r)
-            for s, q, r in zip(signals, ctx.quality, relevance)
+            FrameSignals(signals=s, contexts=scene.contexts, quality=q.score, relevance=r)
+            for s, scene, q, r in zip(signals, scenes, ctx.quality, relevance)
         ]
         ctx.gate2 = score_gate2(frames)
         ctx.verdict = decide(ctx.gate2)
@@ -223,8 +330,11 @@ def apply_gate2(ctx: ModerationContext) -> None:
         return
     if ctx.gate1.outcome != "pass" or ctx.gate1.wild:
         return  # Gate 1 already sent it to a human
-    if settings.gate1.enforce and settings.gate2.enforce and settings.gate1.approve_on_pass:
-        ctx.flags.append("d1_d3_unchecked")  # POC: no D1-D3 detectors yet (step 2e)
+    if "nsfw_unavailable" in ctx.flags:
+        return
+    if settings.gate1.enforce and settings.gate2.enforce:
+        if settings.gate2.flag_zero_shot:
+            ctx.flags.append("d1_d3_zero_shot")  # D1-D3 detectors not yet measured on real cases
         ctx.decision = "APPROVED"
 
 
@@ -238,13 +348,18 @@ def log_gate2(ctx: ModerationContext) -> None:
     issue = Counter(q.issue for q in ctx.quality).most_common(1)[0][0]
     kind = Counter(r.kind for r in ctx.relevance).most_common(1)[0][0] if ctx.relevance else "-"
     sure = max((r.confidence for r in ctx.relevance if r.kind == kind), default=0.0)
+    contexts = sorted({c for scene in ctx.scene for c in scene.contexts})
     gate2_logger.info(
         "content_id=%s verdict=%s composite=%s D1=%s D2=%s D3=%s D4=%s D5=%s (%s) D6=%s (%s %.2f) "
-        "signals=%s frames=%d",
+        "signals=%s contexts=%s nsfw=%s text_words=%d sounds=%s speech_words=%s frames=%d",
         ctx.content_id, ctx.verdict.decision, show(ctx.verdict.composite_score),
         show(d["D1_welfare"]), show(d["D2_nsfw"]), show(d["D3_violence"]), show(d["D4_prohibited"]),
         show(d["D5_quality"]), issue, show(d["D6_relevance"]), kind, sure,
-        ",".join(ctx.gate2.fired) or "-", len(ctx.quality),
+        ",".join(ctx.gate2.fired) or "-", ",".join(contexts) or "-",
+        f"{max(ctx.nsfw.values()):.2f}" if ctx.nsfw else "-",
+        sum(len(text_hits(t)) for t in ctx.ocr_text.values()),  # how many, never the words
+        ctx.audio.sounds if ctx.audio else "-", ctx.audio.speech_words if ctx.audio else "-",
+        len(ctx.quality),
     )
 
 

@@ -12,6 +12,7 @@ from app.core.logging import log_problem, log_result
 from app.core.versioning import current_model_version
 from app.pipeline.context import ModerationContext
 from app.pipeline.orchestrator import finish, run_pipeline
+from app.validation.csam import CsamCheckError
 from app.validation.errors import ProcessingTimeout, ValidationFailure
 from app.validation.intake import remove_temp_file, save_upload
 
@@ -72,6 +73,10 @@ async def moderate_content(
         try:
             try:
                 response = await run_in_threadpool(run_pipeline, ctx)
+            except CsamCheckError as exc:
+                # The safety check could not run: no decision, nothing stored, retry later.
+                log_problem(503, ctx.content_id, str(exc))
+                raise HTTPException(status_code=503, detail="Safety check unavailable. Try again shortly.")
             except ProcessingTimeout as exc:
                 # Not a decision: skip storing, release the lock, let the caller retry.
                 log_problem(503, ctx.content_id, str(exc))

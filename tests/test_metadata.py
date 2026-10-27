@@ -50,6 +50,24 @@ def test_generator_software_gives_hint(tmp_path):
     assert "generator:midjourney" in meta.ai_hints
 
 
+def test_generator_name_inside_another_word_is_no_hint(tmp_path):
+    # a real Photoshop XMP tag: "imagen" (Google's generator) is inside "ImageNumber"
+    xmp = b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:Description aux:ImageNumber="0"/></x:xmpmeta>'
+    exif = Image.Exif()
+    exif[0x0131] = "Adobe Photoshop CS6 (Windows)"
+
+    meta = read_image_metadata(save_jpeg(tmp_path, exif=exif, xmp=xmp))
+
+    assert meta.ai_hints == []
+
+
+def test_generator_name_as_a_word_gives_hint(tmp_path):
+    exif = Image.Exif()
+    exif[0x0131] = "Google Imagen 4"
+
+    assert read_image_metadata(save_jpeg(tmp_path, exif=exif)).ai_hints == ["generator:imagen"]
+
+
 def test_xmp_trained_algorithmic_media_gives_hint(tmp_path):
     xmp = (
         b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
