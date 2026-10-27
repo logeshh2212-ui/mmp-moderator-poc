@@ -25,11 +25,11 @@ def with_model(monkeypatch):
 
 @pytest.fixture
 def detectors_see(monkeypatch):
-    """Pretend the (not yet built) D1-D4 detectors saw these signals in every frame."""
-    def use(*signals):
+    """Pretend the (not yet built) D1-D3 detectors saw these signals in every frame."""
+    def use(*wanted):
         monkeypatch.setattr(
             orchestrator, "FrameSignals",
-            lambda **kw: FrameSignals(signals=set(signals), **kw),
+            lambda signals=frozenset(), **kw: FrameSignals(signals=set(signals) | set(wanted), **kw),
         )
     return use
 
@@ -76,7 +76,7 @@ def test_pass_gets_all_six_dimensions_and_a_composite(tmp_path, with_model):
     assert scores.D6_relevance >= 85
     assert ctx.relevance[0].kind == "personal_moment"
     assert response.composite_score >= settings.gate2.thresholds.approve
-    assert "d1_d4_unchecked" in response.flags
+    assert "d1_d3_unchecked" in response.flags
 
 
 def test_quality_uses_the_original_upload_size(tmp_path, with_model):

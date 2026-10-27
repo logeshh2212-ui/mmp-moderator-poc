@@ -170,7 +170,7 @@ def test_pipeline_pass(tmp_path, with_model):
     response = orchestrator.run_pipeline(ctx)
 
     assert response.decision == "APPROVED"
-    assert response.flags == ["validation_passed", "gate1_passed", "d1_d4_unchecked"]
+    assert response.flags == ["validation_passed", "gate1_passed", "d1_d3_unchecked"]
     assert response.pet_score >= 75
     assert ctx.gate1.outcome == "pass"
 
@@ -222,7 +222,7 @@ def test_pipeline_video_uses_every_frame(videos, with_model):
 
     response = orchestrator.run_pipeline(ctx)
 
-    assert response.flags == ["validation_passed", "gate1_passed", "d1_d4_unchecked"]
+    assert response.flags == ["validation_passed", "gate1_passed", "d1_d3_unchecked"]
     assert len(ctx.gate1.frames) == len(ctx.prepared.frames)
     assert ctx.gate1.pass_fraction == 1.0
 

@@ -12,6 +12,7 @@ from app.decision.engine import decide
 from app.gates.detection import detect_animals, detector_frame_indices
 from app.gates.gate1 import run_gate1
 from app.gates.gate2 import FrameSignals, score_gate2
+from app.gates.items import item_signals
 from app.gates.quality import frame_quality, jpeg_quality
 from app.gates.relevance import score_relevance
 from app.ml.registry import get_backbone, get_detector, get_species_model
@@ -176,8 +177,8 @@ def source_info(ctx: ModerationContext) -> tuple[int, float | None]:
 
 
 def run_gate2(ctx: ModerationContext, backbone) -> None:
-    """D5 on every frame (on Gate 1's pet box where the detector looked) and D6 from the
-    SigLIP embeddings. D1-D4 detectors arrive in steps 2d / 2e; until then no signals."""
+    """D4 items from Gate 1's detector boxes, D5 on every frame (on Gate 1's pet box where
+    the detector looked) and D6 from the SigLIP embeddings. D1-D3 arrive in step 2e."""
     with timed(ctx, "gate2"):
         short_side, jpeg_q = source_info(ctx)
         for i, frame in enumerate(ctx.prepared.frames):
@@ -189,7 +190,15 @@ def run_gate2(ctx: ModerationContext, backbone) -> None:
         ctx.relevance = score_relevance(sims, backbone.labels, backbone.scale) or []
         relevance = [r.score for r in ctx.relevance] or [None] * len(ctx.quality)
 
-        frames = [FrameSignals(quality=q.score, relevance=r) for q, r in zip(ctx.quality, relevance)]
+        # D4 items: only on the frames the detector looked at (images: the one frame)
+        signals = [
+            item_signals(ctx.detections[i].items) if i in ctx.detections else set()
+            for i in range(len(ctx.quality))
+        ]
+        frames = [
+            FrameSignals(signals=s, quality=q.score, relevance=r)
+            for s, q, r in zip(signals, ctx.quality, relevance)
+        ]
         ctx.gate2 = score_gate2(frames)
         ctx.verdict = decide(ctx.gate2)
 
@@ -215,7 +224,7 @@ def apply_gate2(ctx: ModerationContext) -> None:
     if ctx.gate1.outcome != "pass" or ctx.gate1.wild:
         return  # Gate 1 already sent it to a human
     if settings.gate1.enforce and settings.gate2.enforce and settings.gate1.approve_on_pass:
-        ctx.flags.append("d1_d4_unchecked")  # POC: no safety detectors yet (steps 2d / 2e)
+        ctx.flags.append("d1_d3_unchecked")  # POC: no D1-D3 detectors yet (step 2e)
         ctx.decision = "APPROVED"
 
 

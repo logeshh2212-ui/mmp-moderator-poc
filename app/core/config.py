@@ -270,6 +270,11 @@ class Gate2QualitySettings(StrictModel):
     jpeg_quality_below: float = Field(gt=0, le=100)
 
 
+class Gate2ItemsSettings(StrictModel):
+    min_score: float = Field(gt=0, le=1)
+    queries: dict[str, str | None] = Field(min_length=1)   # OWLv2 query -> signal (None = harmless)
+
+
 class Gate2RelevanceKind(StrictModel):
     band: Band                                  # spec 4.6 D6 range for this kind of post
     sentences: list[str] = Field(min_length=1)  # what SigLIP compares the picture with
@@ -291,6 +296,7 @@ class Gate2Settings(StrictModel):
     signals: dict[str, Gate2Signal]
     contexts: dict[str, Gate2Context]
     quality: Gate2QualitySettings
+    items: Gate2ItemsSettings
     relevance: Gate2RelevanceSettings
 
     @model_validator(mode="after")
@@ -309,6 +315,11 @@ class Gate2Settings(StrictModel):
             hard = sorted(s for s in named if self.signals[s].hard)
             if hard:
                 raise ValueError(f"gate2.contexts.{name} cannot change hard-reject signals: {hard}")
+        for query, signal in self.items.queries.items():
+            if signal is not None and (
+                signal not in self.signals or self.signals[signal].dimension != "D4_prohibited"
+            ):
+                raise ValueError(f"gate2.items.queries.{query}: {signal} is not a D4 signal")
         return self
 
 

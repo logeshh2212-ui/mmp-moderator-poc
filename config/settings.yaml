@@ -131,9 +131,9 @@ gate1:
   # true = act on Gate 1 (MOD_001 rejections). false = shadow mode: compute and flag only,
   # decision stays HUMAN_REVIEW. The POC runs live; production can start in shadow mode.
   enforce: true
-  # POC only: the D1-D4 safety detectors (steps 2d / 2e) do not exist yet, so D1-D4 are 100
-  # by default. true = a post Gate 2 approves is APPROVED (flagged d1_d4_unchecked);
-  # false = it waits for a human. Remove once D1-D4 are built (step 2f).
+  # POC only: the D1-D3 safety detectors (step 2e) do not exist yet, so D1-D3 are 100
+  # by default. true = a post Gate 2 approves is APPROVED (flagged d1_d3_unchecked);
+  # false = it waits for a human. Remove once D1-D3 are built (step 2f).
   approve_on_pass: true
   thresholds:
     pass_photo: 75          # spec 2.2
@@ -275,7 +275,7 @@ targets:   # spec MMP-MOD-2026-001, non-functional requirements
 
 gate2:
   # Bump when the Gate 2 logic changes. Part of model_version, like gate1.version.
-  version: gate2-0.2   # 0.2: D5 quality + D6 relevance, wired into the pipeline
+  version: gate2-0.3   # 0.3: D4 prohibited items (OWLv2 queries); 0.2: D5 + D6, wired in
   # true = act on Gate 2 (rejections, reviews). false = shadow mode: scores are computed,
   # reported and logged, but a Gate 2 rejection only adds the flag gate2_would_reject.
   enforce: true
@@ -378,6 +378,32 @@ gate2:
     bar_min_fraction: 0.08     # bars on both sides covering at least this = letterboxed
     lowres_short_side_below: 480
     jpeg_quality_below: 30
+  # D4 prohibited items (spec 4.4), app/gates/items.py. Extra queries in Gate 1's OWLv2 pass
+  # (no extra model run): query -> gate2 signal. Every box takes the name it fits best, so
+  # the harmless look-alikes (null) catch toy guns and kitchen knives before they count.
+  # Drug use on an animal and weapons pointed at someone need the whole scene: step 2e.
+  items:
+    # OWLv2 box score an item needs to count. 2026-10-27, 93 safe photos (easy set + hard-case
+    # pets): highest item scores 0.36 (machete on an old monkey photo), 0.33 (cannabis plant
+    # on a snail's leaf), everything else < 0.3. No positive photos measured yet (junior T3).
+    min_score: 0.4
+    queries:
+      gun: item_firearm
+      rifle: item_firearm
+      pistol: item_firearm
+      toy gun: null
+      water gun: null
+      large knife: item_weapon_knife
+      machete: item_weapon_knife
+      kitchen knife: null    # spec 4.4: an incidental kitchen knife is ignored
+      bong: item_drugs
+      marijuana joint: item_drugs   # no "cannabis plant": it fires on ordinary leaves
+      beer bottle: item_alcohol
+      wine bottle: item_alcohol
+      glass of beer: item_alcohol
+      cigarette: item_tobacco
+      cigar: item_tobacco
+      vape: item_tobacco
   # D6 context relevance (spec 4.6), app/gates/relevance.py. SigLIP compares the picture
   # with these sentences; the most likely kind gives the band, and SigLIP's certainty
   # places the score inside it (unsure = bottom of the band).

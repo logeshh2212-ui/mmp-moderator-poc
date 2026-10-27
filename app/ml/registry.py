@@ -69,7 +69,8 @@ def load_models() -> None:
         from app.ml.owlv2 import Owlv2Detector
 
         registry.register(Owlv2Detector(
-            settings.ml.detector, labels=species, lookalikes=settings.gate1.detector.lookalikes
+            settings.ml.detector, labels=species, lookalikes=settings.gate1.detector.lookalikes,
+            items=list(settings.gate2.items.queries),
         ))
     if settings.ml.species_model:
         from app.ml.bioclip import BioclipClassifier

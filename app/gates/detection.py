@@ -28,10 +28,19 @@ def detect_animals(pictures: list[Image.Image], detector, species_model=None) ->
     for img, all_boxes in zip(pictures, detector.detect(pictures)):
         # Look-alike boxes (statue, plush toy...) never count as an animal.
         boxes = [b for b in all_boxes if getattr(b, "animal", True)]
-        lookalike = next((b for b in all_boxes if not getattr(b, "animal", True)), None)
+        lookalike = next(
+            (b for b in all_boxes if not getattr(b, "animal", True) and not getattr(b, "item", False)),
+            None,
+        )
         lookalike_text = f"{lookalike.label} ({lookalike.score:.2f})" if lookalike else None
+        items = {}  # Gate 2 (D4): best score per item query; boxes come best first
+        for b in all_boxes:
+            if getattr(b, "item", False):
+                items.setdefault(b.label, b.score)
         if not boxes:
-            results.append(FrameDetections(det_max=0.0, det_label=None, lookalike=lookalike_text))
+            results.append(FrameDetections(
+                det_max=0.0, det_label=None, lookalike=lookalike_text, items=items,
+            ))
             continue
         good = [b for b in boxes if b.score >= cfg.min_box_score][: cfg.max_species_boxes]
         names = [b.label for b in good]
@@ -47,5 +56,6 @@ def detect_animals(pictures: list[Image.Image], detector, species_model=None) ->
             species_confidence=confidences[0] if confidences else 0.0,
             lookalike=lookalike_text,
             box=boxes[0].xyxy,
+            items=items,
         ))
     return results
