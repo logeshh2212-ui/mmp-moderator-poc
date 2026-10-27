@@ -58,9 +58,12 @@ def load_models() -> None:
     configure_torch()
     if settings.ml.backbone:
         from app.gates.gate1 import gate1_prompts
+        from app.gates.relevance import relevance_prompts
         from app.ml.siglip import SiglipEmbedder
 
-        registry.register(SiglipEmbedder(settings.ml.backbone, prompts=gate1_prompts()))
+        # The text half is dropped after these are embedded: every sentence is needed here.
+        prompts = gate1_prompts() | relevance_prompts()
+        registry.register(SiglipEmbedder(settings.ml.backbone, prompts=prompts))
     species = list(settings.gate1.species)
     if settings.ml.detector:
         from app.ml.owlv2 import Owlv2Detector

@@ -53,12 +53,17 @@ def moderate(api_url, name, data, content_type, user_id, context):
 
 def to_row(name, content_type, status, body, round_trip_ms):
     flags = ", ".join(body.get("flags", [])) if "flags" in body else str(body.get("detail"))
+    dims = body.get("dimension_scores") or {}
     return {
         "file": name,
         "type": content_type,
         "http": status,
         "decision": body.get("decision"),
         "code": body.get("rejection_code"),
+        "pet_score": body.get("pet_score"),
+        "composite": body.get("composite_score"),
+        "D5_quality": dims.get("D5_quality"),
+        "D6_relevance": dims.get("D6_relevance"),
         "flags": flags,
         "server_ms": body.get("processing_ms"),
         "round_trip_ms": round_trip_ms,
@@ -140,6 +145,11 @@ with upload_tab:
                     decision = body.get("decision") or f"HTTP {status}"
                     color = DECISION_COLOR.get(decision, "gray")
                     st.markdown(f"### {f.name}  :{color}[{decision}]")
+                    row = rows[-1]
+                    st.write(
+                        f"**pet_score:** {row['pet_score']}  ·  **composite:** {row['composite']}  ·  "
+                        f"**D5 quality:** {row['D5_quality']}  ·  **D6 relevance:** {row['D6_relevance']}"
+                    )
                     st.write(
                         f"**code:** {body.get('rejection_code')}  ·  "
                         f"**flags:** {rows[-1]['flags']}  ·  "

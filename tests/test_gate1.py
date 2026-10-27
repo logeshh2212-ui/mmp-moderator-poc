@@ -7,10 +7,11 @@ from PIL import Image
 
 from app.core.config import settings
 from app.gates.gate1 import gate1_prompts, run_gate1
+from app.gates.relevance import relevance_prompts
 from app.pipeline import orchestrator
 from app.pipeline.context import ModerationContext
 
-LABELS = list(gate1_prompts())
+LABELS = list(gate1_prompts() | relevance_prompts())   # what the real backbone embeds
 SCALE = 100.0  # like the real model (~113): small similarity gaps decide the score
 
 
@@ -169,7 +170,7 @@ def test_pipeline_pass(tmp_path, with_model):
     response = orchestrator.run_pipeline(ctx)
 
     assert response.decision == "APPROVED"
-    assert response.flags == ["validation_passed", "gate1_passed"]
+    assert response.flags == ["validation_passed", "gate1_passed", "d1_d4_unchecked"]
     assert response.pet_score >= 75
     assert ctx.gate1.outcome == "pass"
 
@@ -221,7 +222,7 @@ def test_pipeline_video_uses_every_frame(videos, with_model):
 
     response = orchestrator.run_pipeline(ctx)
 
-    assert response.flags == ["validation_passed", "gate1_passed"]
+    assert response.flags == ["validation_passed", "gate1_passed", "d1_d4_unchecked"]
     assert len(ctx.gate1.frames) == len(ctx.prepared.frames)
     assert ctx.gate1.pass_fraction == 1.0
 

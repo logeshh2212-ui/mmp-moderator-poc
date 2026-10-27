@@ -26,6 +26,7 @@ def decision_settings() -> dict:
             "prompts": ml.prompts,
         },
         "gate1": settings.gate1.model_dump(),
+        "gate2": settings.gate2.model_dump(),
     }
 
 
@@ -38,7 +39,7 @@ def settings_fingerprint() -> str:
 def current_model_version() -> str:
     """Logged on every decision (spec 8.3) and part of the cache key.
 
-    Example: validation-0.1+gate1-zs-0.1+siglip2_base@f775b65+cfg3a9c41d2
+    Example: validation-0.1+gate1-fused-0.4+gate2-0.2+siglip2_base@f775b65+cfg3a9c41d2
     """
     backbone = settings.ml.backbone
     model = (
@@ -47,6 +48,7 @@ def current_model_version() -> str:
     return "+".join([
         settings.model_version,
         settings.gate1.version,
+        settings.gate2.version,
         model,
         f"cfg{settings_fingerprint()}",
     ])

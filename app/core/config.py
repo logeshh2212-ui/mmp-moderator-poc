@@ -270,8 +270,18 @@ class Gate2QualitySettings(StrictModel):
     jpeg_quality_below: float = Field(gt=0, le=100)
 
 
+class Gate2RelevanceKind(StrictModel):
+    band: Band                                  # spec 4.6 D6 range for this kind of post
+    sentences: list[str] = Field(min_length=1)  # what SigLIP compares the picture with
+
+
+class Gate2RelevanceSettings(StrictModel):
+    kinds: dict[str, Gate2RelevanceKind] = Field(min_length=2)
+
+
 class Gate2Settings(StrictModel):
     version: str
+    enforce: bool
     weights: dict[Dimension, float]
     thresholds: Gate2Thresholds
     review_from_deduction: float = Field(gt=0, le=100)
@@ -281,6 +291,7 @@ class Gate2Settings(StrictModel):
     signals: dict[str, Gate2Signal]
     contexts: dict[str, Gate2Context]
     quality: Gate2QualitySettings
+    relevance: Gate2RelevanceSettings
 
     @model_validator(mode="after")
     def policy_is_consistent(self):

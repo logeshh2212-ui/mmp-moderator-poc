@@ -8,7 +8,9 @@ VALID_USER = "3f2b8c1e-0000-4000-8000-000000000001"
 def test_model_version_names_every_part():
     version = current_model_version()
 
-    assert version.startswith(f"{settings.model_version}+{settings.gate1.version}+")
+    assert version.startswith(
+        f"{settings.model_version}+{settings.gate1.version}+{settings.gate2.version}+"
+    )
     assert "+no-model+" in version  # tests run without a real model
     assert "+cfg" in version
 

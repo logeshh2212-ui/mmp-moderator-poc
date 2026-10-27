@@ -11,7 +11,11 @@ from app.validation.result import ValidationResult
 from app.validation.csam import CsamResult
 from app.cache.blocklist import BlocklistMatch
 from app.prepare.media import PreparedMedia
-from app.gates.gate1 import Gate1Result
+from app.gates.gate1 import FrameDetections, Gate1Result
+from app.gates.gate2 import Gate2Result
+from app.gates.quality import QualityResult
+from app.gates.relevance import RelevanceResult
+from app.decision.engine import Verdict
 
 
 
@@ -48,6 +52,13 @@ class ModerationContext:
 
     # Step 17: Gate 1
     gate1: Gate1Result | None = None
+    detections: dict[int, FrameDetections] = field(default_factory=dict)  # frame index -> boxes
+
+    # Gate 2: per-frame D5 / D6, then the dimension scores and the engine's verdict
+    quality: list[QualityResult] = field(default_factory=list)
+    relevance: list[RelevanceResult] = field(default_factory=list)
+    gate2: Gate2Result | None = None
+    verdict: Verdict | None = None
 
     # Milliseconds per pipeline stage, logged on every request (speed work comes later)
     timings: dict[str, int] = field(default_factory=dict)

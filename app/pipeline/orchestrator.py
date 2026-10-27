@@ -1,14 +1,19 @@
 import logging
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
 
-from app.api.schemas import ModerationResponse
+from app.api.schemas import DimensionScores, ModerationResponse
 from app.cache.blocklist import get_blocklist
 from app.core.config import settings
 from app.core.logging import log_result
+from app.decision.engine import decide
 from app.gates.detection import detect_animals, detector_frame_indices
 from app.gates.gate1 import run_gate1
+from app.gates.gate2 import FrameSignals, score_gate2
+from app.gates.quality import frame_quality, jpeg_quality
+from app.gates.relevance import score_relevance
 from app.ml.registry import get_backbone, get_detector, get_species_model
 from app.pipeline.context import ModerationContext
 from app.prepare import prepare_media
@@ -23,6 +28,7 @@ from app.validation.video_check import check_video
 
 
 gate1_logger = logging.getLogger("mmp.gate1")
+gate2_logger = logging.getLogger("mmp.gate2")
 
 
 @contextmanager
@@ -110,8 +116,12 @@ def run_pipeline(ctx: ModerationContext) -> ModerationResponse:
             return finish(ctx)
         run_gate1_branches(ctx, backbone)
         apply_gate1(ctx)
+        # Gate 2 (spec 3-5) for everything Gate 1 did not rule out.
+        if ctx.gate1.outcome != "fail":
+            run_gate2(ctx, backbone)
+            apply_gate2(ctx)
 
-    # Later phases each add one call here (Gate 2, decision engine, AI label).
+    # Later phases each add one call here (AI label, audit log).
     return finish(ctx)
 
 
@@ -128,6 +138,7 @@ def run_gate1_branches(ctx: ModerationContext, backbone) -> None:
         species_model = get_species_model()
         with timed(ctx, "detector+species"):
             detections = detect_animals(pictures, detector, species_model)
+        ctx.detections = dict(zip(indices, detections))  # Gate 2 measures D5 on these boxes
         sims = sims[indices]  # Gate 1 judges the frames both branches looked at
 
     with timed(ctx, "gate1"):
@@ -154,9 +165,78 @@ def apply_gate1(ctx: ModerationContext) -> None:
     ctx.flags.append("gate1_passed")
     if result.wild:
         ctx.flags.append("wild_context")  # decided: wild / marine animals go to a human
+
+
+def source_info(ctx: ModerationContext) -> tuple[int, float | None]:
+    """Short side of the original upload, and the JPEG save quality (images only)."""
+    image, video = ctx.validation.image, ctx.validation.video
+    if image is not None:
+        return min(image.width, image.height), jpeg_quality(ctx.path)
+    return min(video.width, video.height), None
+
+
+def run_gate2(ctx: ModerationContext, backbone) -> None:
+    """D5 on every frame (on Gate 1's pet box where the detector looked) and D6 from the
+    SigLIP embeddings. D1-D4 detectors arrive in steps 2d / 2e; until then no signals."""
+    with timed(ctx, "gate2"):
+        short_side, jpeg_q = source_info(ctx)
+        for i, frame in enumerate(ctx.prepared.frames):
+            found = ctx.detections.get(i)
+            box = found.box if found else None
+            ctx.quality.append(frame_quality(frame.detector, box, short_side, jpeg_q))
+
+        sims = backbone.similarities(ctx.embeddings)
+        ctx.relevance = score_relevance(sims, backbone.labels, backbone.scale) or []
+        relevance = [r.score for r in ctx.relevance] or [None] * len(ctx.quality)
+
+        frames = [FrameSignals(quality=q.score, relevance=r) for q, r in zip(ctx.quality, relevance)]
+        ctx.gate2 = score_gate2(frames)
+        ctx.verdict = decide(ctx.gate2)
+
+
+def apply_gate2(ctx: ModerationContext) -> None:
+    verdict = ctx.verdict
+    ctx.composite_score = verdict.composite_score
+    dimensions = ctx.gate2.dimensions
+    if all(value is not None for value in dimensions.values()):
+        ctx.dimension_scores = DimensionScores(**{d: round(v, 1) for d, v in dimensions.items()})
+    ctx.flags += verdict.flags
+    log_gate2(ctx)
+
+    if verdict.decision == "REJECTED":
+        if settings.gate2.enforce:
+            ctx.reject(verdict.rejection_code, "gate2_rejected", hard=verdict.hard_reject)
+        else:
+            ctx.flags.append("gate2_would_reject")  # shadow mode
         return
-    if settings.gate1.enforce and settings.gate1.approve_on_pass:
-        ctx.decision = "APPROVED"  # POC only, until Gate 2 exists
+    if verdict.decision == "HUMAN_REVIEW":
+        ctx.flags.append("gate2_review")
+        return
+    if ctx.gate1.outcome != "pass" or ctx.gate1.wild:
+        return  # Gate 1 already sent it to a human
+    if settings.gate1.enforce and settings.gate2.enforce and settings.gate1.approve_on_pass:
+        ctx.flags.append("d1_d4_unchecked")  # POC: no safety detectors yet (steps 2d / 2e)
+        ctx.decision = "APPROVED"
+
+
+def log_gate2(ctx: ModerationContext) -> None:
+    """One line per upload with the six dimensions and what D5 / D6 saw, for checking by hand."""
+    d = ctx.gate2.dimensions
+
+    def show(value):
+        return "-" if value is None else f"{value:.0f}"
+
+    issue = Counter(q.issue for q in ctx.quality).most_common(1)[0][0]
+    kind = Counter(r.kind for r in ctx.relevance).most_common(1)[0][0] if ctx.relevance else "-"
+    sure = max((r.confidence for r in ctx.relevance if r.kind == kind), default=0.0)
+    gate2_logger.info(
+        "content_id=%s verdict=%s composite=%s D1=%s D2=%s D3=%s D4=%s D5=%s (%s) D6=%s (%s %.2f) "
+        "signals=%s frames=%d",
+        ctx.content_id, ctx.verdict.decision, show(ctx.verdict.composite_score),
+        show(d["D1_welfare"]), show(d["D2_nsfw"]), show(d["D3_violence"]), show(d["D4_prohibited"]),
+        show(d["D5_quality"]), issue, show(d["D6_relevance"]), kind, sure,
+        ",".join(ctx.gate2.fired) or "-", len(ctx.quality),
+    )
 
 
 def log_gate1(ctx: ModerationContext) -> None:

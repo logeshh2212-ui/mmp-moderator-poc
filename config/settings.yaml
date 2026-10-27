@@ -131,8 +131,9 @@ gate1:
   # true = act on Gate 1 (MOD_001 rejections). false = shadow mode: compute and flag only,
   # decision stays HUMAN_REVIEW. The POC runs live; production can start in shadow mode.
   enforce: true
-  # POC only: Gate 2 does not exist yet, so a Gate 1 pass is APPROVED.
-  # Set to false once Gate 2 is built (then a pass goes on to the safety checks).
+  # POC only: the D1-D4 safety detectors (steps 2d / 2e) do not exist yet, so D1-D4 are 100
+  # by default. true = a post Gate 2 approves is APPROVED (flagged d1_d4_unchecked);
+  # false = it waits for a human. Remove once D1-D4 are built (step 2f).
   approve_on_pass: true
   thresholds:
     pass_photo: 75          # spec 2.2
@@ -273,8 +274,11 @@ targets:   # spec MMP-MOD-2026-001, non-functional requirements
 
 
 gate2:
-  # Bump when the Gate 2 logic changes. Joins model_version when Gate 2 is wired in (step 2c).
-  version: gate2-engine-0.1
+  # Bump when the Gate 2 logic changes. Part of model_version, like gate1.version.
+  version: gate2-0.2   # 0.2: D5 quality + D6 relevance, wired into the pipeline
+  # true = act on Gate 2 (rejections, reviews). false = shadow mode: scores are computed,
+  # reported and logged, but a Gate 2 rejection only adds the flag gate2_would_reject.
+  enforce: true
   weights:            # spec 3.2; must add up to 1
     D1_welfare: 0.25
     D2_nsfw: 0.25
@@ -374,3 +378,59 @@ gate2:
     bar_min_fraction: 0.08     # bars on both sides covering at least this = letterboxed
     lowres_short_side_below: 480
     jpeg_quality_below: 30
+  # D6 context relevance (spec 4.6), app/gates/relevance.py. SigLIP compares the picture
+  # with these sentences; the most likely kind gives the band, and SigLIP's certainty
+  # places the score inside it (unsure = bottom of the band).
+  relevance:
+    kinds:
+      personal_moment:
+        band: [85, 100]
+        sentences:
+          - a candid photo of a person with their pet
+          - a selfie of a pet owner with their pet
+          - a person cuddling their pet
+      domestic:
+        band: [85, 100]
+        sentences:
+          - a photo of a pet at home
+          - a pet in a garden or backyard
+          - a pet on a walk outdoors
+          - a pet resting on a bed or sofa
+      vet_groomer_shop:
+        band: [75, 90]
+        sentences:
+          - a pet at a veterinary clinic
+          - a pet being groomed at a grooming salon
+          - animals for sale in a pet shop
+      commercial_shoot:
+        band: [65, 80]
+        sentences:
+          - a professional studio photo of a pet on a plain background
+          - a stock photo of a pet
+          - a product photo of pet food or a pet toy
+      meme:
+        band: [60, 80]
+        sentences:
+          - a funny meme of a pet with a text caption
+          - an edited humorous picture of a pet
+      infographic:
+        band: [55, 75]
+        sentences:
+          - an infographic about pet care with text and icons
+          - an educational chart about animals
+      advert:
+        band: [20, 40]
+        sentences:
+          - an advertising banner with a small pet logo
+          - a promotional flyer with a discount offer
+      spam:
+        band: [0, 20]
+        sentences:
+          - an advertisement for something unrelated to animals
+          - a screenshot of a spam message
+          - a product for sale with a price tag
+      political_religious:
+        band: [30, 50]
+        sentences:
+          - a political poster or protest sign
+          - religious imagery with a symbol of faith
