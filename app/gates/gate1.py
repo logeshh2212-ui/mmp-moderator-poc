@@ -18,6 +18,7 @@ class FrameDetections:
     species: list[str] = field(default_factory=list)  # final species names, best box first
     species_confidence: float = 0.0   # BioCLIP's probability for species[0] (0 = detector's name)
     lookalike: str | None = None      # best non-animal box, e.g. "statue (0.62)", for the log
+    box: tuple[float, float, float, float] | None = None  # best animal box, detector picture pixels (D5)
 
 
 @dataclass

@@ -119,6 +119,13 @@ def test_no_boxes_means_det_max_zero():
     [found] = detect_animals(pictures(), FakeDetector([]), FakeSpecies("dog"))
 
     assert (found.det_max, found.det_label, found.species) == (0.0, None, [])
+    assert found.box is None
+
+
+def test_best_animal_box_is_kept_for_d5():
+    [found] = detect_animals(pictures(), FakeDetector([box(0.8, "dog")]), FakeSpecies("dog"))
+
+    assert found.box == (10.0, 10.0, 50.0, 50.0)
 
 
 def test_species_model_names_the_good_boxes():

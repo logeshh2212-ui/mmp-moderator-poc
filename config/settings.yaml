@@ -348,3 +348,29 @@ gate2:
       deductions: {welfare_graphic_dead: 0, welfare_distress: 0}
     hunting:               # firearm in a hunting scene goes to a human
       review_on: [item_firearm]
+  # D5 image quality (spec 4.5), app/gates/quality.py. Measured on the detector-size
+  # picture (long side 640); sharpness on Gate 1's pet box when there is one. The worst
+  # problem found decides the score. Tuned with scripts/make_quality_set.py + bench_quality.py.
+  quality:
+    bands:                     # spec 4.5 score ranges
+      sharp: [80, 100]
+      slight_blur: [55, 75]
+      heavy_blur: [10, 30]
+      dark: [40, 60]           # also used for burnt-out (overexposed) pictures
+      screenshot: [30, 50]     # low resolution or a letterboxed video screenshot
+      compressed: [20, 40]
+    blank_max_contrast: 4      # brightness std below this = solid colour frame -> 0
+    sharpness:                 # Laplacian variance at mid-grey brightness (quality set, 2026-10-27:
+      heavy_below: 10          #   heavy blur 0-10, slight blur 3-175, good photos mostly 170-7500)
+      slight_below: 130
+      full_at: 700
+    min_box_side: 48           # pet boxes smaller than this: measure the whole picture
+    dark_mean_below: 50        # darkened copies 11-43, darkest good photo 58
+    bright_level: 250
+    bright_fraction_above: 0.5 # burnt-out copies mostly 0.6-0.9; white studio backgrounds
+                               #   reach 0.7 on the whole picture, hence measured on the pet box
+    bar_level: 20              # a row / column darker than this and ...
+    bar_max_std: 4             # ... this flat counts as a black bar
+    bar_min_fraction: 0.08     # bars on both sides covering at least this = letterboxed
+    lowres_short_side_below: 480
+    jpeg_quality_below: 30

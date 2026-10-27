@@ -231,6 +231,45 @@ class Gate2Context(StrictModel):
     review_on: list[str] = Field(default_factory=list)
 
 
+Band = tuple[float, float]   # (lowest, highest) D5 score, spec 4.5
+
+
+class Gate2QualityBands(StrictModel):
+    sharp: Band
+    slight_blur: Band
+    heavy_blur: Band
+    dark: Band
+    screenshot: Band
+    compressed: Band
+
+
+class Gate2SharpnessSettings(StrictModel):
+    heavy_below: float = Field(gt=0)
+    slight_below: float = Field(gt=0)
+    full_at: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def increasing(self):
+        if not self.heavy_below < self.slight_below < self.full_at:
+            raise ValueError("gate2.quality.sharpness needs heavy_below < slight_below < full_at")
+        return self
+
+
+class Gate2QualitySettings(StrictModel):
+    bands: Gate2QualityBands
+    blank_max_contrast: float = Field(ge=0)
+    sharpness: Gate2SharpnessSettings
+    min_box_side: int = Field(ge=3)
+    dark_mean_below: float = Field(gt=0, le=255)
+    bright_level: float = Field(gt=0, le=255)
+    bright_fraction_above: float = Field(gt=0, lt=1)
+    bar_level: float = Field(ge=0, le=255)
+    bar_max_std: float = Field(ge=0)
+    bar_min_fraction: float = Field(gt=0, lt=1)
+    lowres_short_side_below: int = Field(gt=0)
+    jpeg_quality_below: float = Field(gt=0, le=100)
+
+
 class Gate2Settings(StrictModel):
     version: str
     weights: dict[Dimension, float]
@@ -241,6 +280,7 @@ class Gate2Settings(StrictModel):
     low_score_code: RejectionCode
     signals: dict[str, Gate2Signal]
     contexts: dict[str, Gate2Context]
+    quality: Gate2QualitySettings
 
     @model_validator(mode="after")
     def policy_is_consistent(self):

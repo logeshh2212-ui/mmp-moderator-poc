@@ -46,5 +46,6 @@ def detect_animals(pictures: list[Image.Image], detector, species_model=None) ->
             species=list(dict.fromkeys(names)),
             species_confidence=confidences[0] if confidences else 0.0,
             lookalike=lookalike_text,
+            box=boxes[0].xyxy,
         ))
     return results
