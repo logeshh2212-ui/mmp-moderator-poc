@@ -308,9 +308,9 @@ ai_label:
   # changes the decision. Metadata first (C2PA / IPTC "trained algorithmic media", Stable
   # Diffusion PNG text, generator names in metadata.ai_generator_keywords) = certain;
   # otherwise ml.ai_model on the original image or a few detector frames of a video.
-  version: ai-label-0.1
+  version: ai-label-0.2   # 0.2: one crop (T4: Smaug was 545 of ~800 ms per image with 3)
   threshold: 0.9      # model probability from which ai_generated is true (set from the comparison)
-  crops: 3            # Smaug: 3 x 528 px crops at native resolution; 1 = centre only, 3x faster
+  crops: 1            # Smaug: 1 = centre 528 px crop, about 3x faster; 3 = start, centre, end (more accurate)
   video_frames: 3     # detector frames of a video the model looks at (start, middle, end)
 
 targets:   # spec MMP-MOD-2026-001, non-functional requirements
