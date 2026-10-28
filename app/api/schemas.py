@@ -24,6 +24,14 @@ class DimensionScores(BaseModel):
     D6_relevance: float = Field(ge=0, le=100)
 
 
+class DetectedObject(BaseModel):
+    """One thing the object detector found (not in the spec; for analysing decisions)."""
+
+    label: str                  # the detector's name, e.g. "dog", "statue", "pistol"
+    kind: Literal["animal", "lookalike", "item"]
+    score: float = Field(ge=0, le=1)   # the detector's confidence for its best box
+
+
 class ModerationResponse(BaseModel):
     content_id: UUID
     decision: Decision
@@ -40,6 +48,7 @@ class ModerationResponse(BaseModel):
     rejection_code: RejectionCode | None = None
     flags: list[str] = Field(default_factory=list)
     species_detected: list[str] = Field(default_factory=list)
+    objects_detected: list[DetectedObject] = Field(default_factory=list)
 
     processing_ms: int = Field(ge=0)
     model_version: str

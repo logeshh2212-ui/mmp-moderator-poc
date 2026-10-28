@@ -98,7 +98,8 @@ class PrepareSettings(StrictModel):
     long_video_interval_seconds: float = Field(gt=0)
     last_frame_offset_seconds: float = Field(ge=0)
     max_video_frames: int = Field(ge=3)
-    ffmpeg_hwaccel: str  # "none", "auto", "d3d11va", "qsv"
+    ffmpeg_hwaccel: str  # "none", "cuda" (NVIDIA: decode + resize on the GPU), "auto", "d3d11va", "qsv"
+    decode_pieces: int = Field(ge=1)  # cuda only: video stretches decoded at the same time
 
 class ModelSettings(StrictModel):
     repo: str          # Hugging Face repo, e.g. google/siglip2-base-patch16-384
@@ -469,6 +470,7 @@ def load_settings(path: Path = CONFIG_FILE) -> AppSettings:
     # The cloud GPU run (Step 16b) switches device and precision without editing this file.
     data["ml"]["device"] = os.getenv("ML_DEVICE", data["ml"]["device"])
     data["ml"]["dtype"] = os.getenv("ML_DTYPE", data["ml"]["dtype"])
+    data["prepare"]["ffmpeg_hwaccel"] = os.getenv("FFMPEG_HWACCEL", data["prepare"]["ffmpeg_hwaccel"])
 
 
     return AppSettings.model_validate(data)

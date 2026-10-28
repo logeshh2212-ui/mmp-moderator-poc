@@ -6,7 +6,7 @@ from time import perf_counter
 
 from PIL import Image
 
-from app.api.schemas import DimensionScores, ModerationResponse
+from app.api.schemas import DetectedObject, DimensionScores, ModerationResponse
 from app.cache.blocklist import get_blocklist
 from app.core.config import settings
 from app.core.logging import log_result
@@ -215,10 +215,25 @@ def run_gate1_branches(ctx: ModerationContext, backbone) -> None:
         with timed(ctx, "detector+species"):
             detections = detect_animals(pictures, detector, species_model)
         ctx.detections = dict(zip(indices, detections))  # Gate 2 measures D5 on these boxes
+        ctx.objects_detected = detected_objects(detections)
         sims = sims[indices]  # Gate 1 judges the frames both branches looked at
 
     with timed(ctx, "gate1"):
         ctx.gate1 = run_gate1(sims, backbone.labels, backbone.scale, is_video, detections)
+
+
+def detected_objects(detections) -> list[DetectedObject]:
+    """Every name the detector gave a box, best score over the frames, best first."""
+    best: dict[str, float] = {}
+    for found in detections:
+        for label, score in found.objects.items():
+            best[label] = max(score, best.get(label, 0.0))
+    lookalikes, items = set(settings.gate1.detector.lookalikes), set(settings.gate2.items.queries)
+    return [
+        DetectedObject(label=label, score=round(score, 2),
+                       kind="item" if label in items else "lookalike" if label in lookalikes else "animal")
+        for label, score in sorted(best.items(), key=lambda kv: -kv[1])
+    ]
 
 
 def apply_gate1(ctx: ModerationContext) -> None:

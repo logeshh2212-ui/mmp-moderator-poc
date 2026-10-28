@@ -10,4 +10,5 @@ def prepare_media(path: Path, validation: ValidationResult) -> PreparedMedia:
     """Graph Step 2: turn a validated file into upright RGB pictures at model sizes."""
     if validation.image is not None:
         return prepare_image(path)
-    return prepare_video(path, validation.video.duration_seconds)
+    video = validation.video
+    return prepare_video(path, video.duration_seconds, video.width, video.height)

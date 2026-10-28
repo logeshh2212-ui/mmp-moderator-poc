@@ -5,7 +5,7 @@ from uuid import UUID
 
 import numpy as np
 
-from app.api.schemas import Decision, DimensionScores, ModerationResponse
+from app.api.schemas import Decision, DetectedObject, DimensionScores, ModerationResponse
 from app.core.versioning import current_model_version
 from app.validation.result import ValidationResult
 from app.validation.csam import CsamResult
@@ -75,6 +75,7 @@ class ModerationContext:
     composite_score: float | None = None
     dimension_scores: DimensionScores | None = None
     species_detected: list[str] = field(default_factory=list)
+    objects_detected: list[DetectedObject] = field(default_factory=list)
     ai_generated: bool | None = None
     ai_score: float | None = None
 
@@ -103,6 +104,7 @@ class ModerationContext:
             rejection_code=self.rejection_code,
             flags=list(self.flags),
             species_detected=list(self.species_detected),
+            objects_detected=list(self.objects_detected),
             processing_ms=int((perf_counter() - self.started_at) * 1000),
             model_version=current_model_version(),
         )

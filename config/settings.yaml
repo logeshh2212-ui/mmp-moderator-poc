@@ -96,7 +96,11 @@ prepare:
   long_video_interval_seconds: 1.0
   last_frame_offset_seconds: 0.1
   max_video_frames: 63
-  ffmpeg_hwaccel: none        # "auto" tries Intel Quick Sync / D3D11 video decoding
+  # "cuda" = NVIDIA GPU decodes and resizes (T4: 60 s 1080p60 in 6.1 s vs 12.8 s CPU); any
+  # GPU failure falls back to the CPU. "auto" tries Intel Quick Sync / D3D11. The cloud run
+  # sets it with FFMPEG_HWACCEL=cuda (no NVIDIA GPU on the laptop).
+  ffmpeg_hwaccel: none
+  decode_pieces: 2            # cuda: the T4 has 2 hardware decoders -> 2 pieces 3.6 s, 4 pieces 4.3 s
 
 ml:
   device: cpu        # cpu on this laptop; cuda for the cloud NVIDIA run (Step 16b)
@@ -166,7 +170,7 @@ gate1:
   # Bump when the Gate 1 logic changes. model_version = this + model + revision + a
   # fingerprint of every decision-relevant setting, so editing a sentence or a threshold
   # automatically gives a new model_version (and a new cache key).
-  version: gate1-fused-0.4   # 0.4: look-alike queries, confident-species bar, marine always review
+  version: gate1-fused-0.5   # 0.5: wild-animal list -> always review; 0.4: look-alike queries, confident-species bar, marine always review
   # true = act on Gate 1 (MOD_001 rejections). false = shadow mode: compute and flag only,
   # decision stays HUMAN_REVIEW. The POC runs live; production can start in shadow mode.
   enforce: true
@@ -196,9 +200,14 @@ gate1:
     insects: ["a beetle", "a praying mantis", "a stick insect", "a tarantula", "a scorpion", "a cockroach", "an insect"]
     exotic: ["a deer", "a peacock", "a monkey"]
     marine_mammals: ["a dolphin", "a whale"]
+    # Animals that are not pets (spec 2.1) but must be recognised, so they go to a person
+    # instead of being mistaken for the nearest pet (a fruit bat was approved as "tarantula /
+    # monkey", 2026-10-28). Same names in gate1.species for the detector and BioCLIP.
+    wild_animals: ["a bat", "a tiger", "a lion", "a leopard", "a bear", "a wolf", "a fox",
+                   "an elephant", "a crocodile", "an eagle", "an owl", "a shark", "a wild animal"]
   insect_categories: [insects]                        # use pass_insect
   wild_check_categories: [exotic, marine_mammals]     # decided: no owner context -> HUMAN_REVIEW
-  always_review_categories: [marine_mammals]         # decided: never pets (spec 2.1) -> always HUMAN_REVIEW
+  always_review_categories: [marine_mammals, wild_animals]   # decided: never pets (spec 2.1) -> always HUMAN_REVIEW
   # Plain non-pet scenes only. Pet accessories (cage, tank, bowl, collar, bed, leash) are left
   # out on purpose: they appear IN most pet photos, and SigLIP cannot tell "an empty cage" from
   # "a cage with birds", which rejected real pets (budgies, goldfish, puppy + kitten).
@@ -302,6 +311,77 @@ gate1:
     monkey: exotic
     dolphin: marine_mammals
     whale: marine_mammals
+    # Wild animals -> HUMAN_REVIEW (added 2026-10-28). Left out on purpose because they look
+    # like pets and would send pets to review: dingo, wildcat, hedgehog, python, camel, wild boar.
+    fruit bat: wild_animals
+    bat: wild_animals
+    tiger: wild_animals
+    lion: wild_animals
+    leopard: wild_animals
+    cheetah: wild_animals
+    jaguar: wild_animals
+    snow leopard: wild_animals
+    lynx: wild_animals
+    wolf: wild_animals
+    fox: wild_animals
+    jackal: wild_animals
+    hyena: wild_animals
+    coyote: wild_animals
+    brown bear: wild_animals
+    black bear: wild_animals
+    polar bear: wild_animals
+    sloth bear: wild_animals
+    giant panda: wild_animals
+    red panda: wild_animals
+    gorilla: wild_animals
+    chimpanzee: wild_animals
+    orangutan: wild_animals
+    baboon: wild_animals
+    langur: wild_animals
+    lemur: wild_animals
+    elephant: wild_animals
+    rhinoceros: wild_animals
+    hippopotamus: wild_animals
+    giraffe: wild_animals
+    zebra: wild_animals
+    bison: wild_animals
+    moose: wild_animals
+    antelope: wild_animals
+    gazelle: wild_animals
+    wildebeest: wild_animals
+    kangaroo: wild_animals
+    koala: wild_animals
+    raccoon: wild_animals
+    skunk: wild_animals
+    badger: wild_animals
+    porcupine: wild_animals
+    otter: wild_animals
+    mongoose: wild_animals
+    sloth: wild_animals
+    armadillo: wild_animals
+    pangolin: wild_animals
+    opossum: wild_animals
+    crocodile: wild_animals
+    alligator: wild_animals
+    king cobra: wild_animals
+    komodo dragon: wild_animals
+    monitor lizard: wild_animals
+    eagle: wild_animals
+    hawk: wild_animals
+    vulture: wild_animals
+    owl: wild_animals
+    flamingo: wild_animals
+    ostrich: wild_animals
+    penguin: wild_animals
+    pelican: wild_animals
+    hornbill: wild_animals
+    shark: wild_animals
+    octopus: wild_animals
+    jellyfish: wild_animals
+    seal: wild_animals
+    sea lion: wild_animals
+    walrus: wild_animals
+    stingray: wild_animals
 
 ai_label:
   # Not in the spec: our own label (ai_generated / ai_score in the response). It never
@@ -320,7 +400,7 @@ targets:   # spec MMP-MOD-2026-001, non-functional requirements
 
 gate2:
   # Bump when the Gate 2 logic changes. Part of model_version, like gate1.version.
-  version: gate2-0.14  # 0.14: slaughterhouse / carcasses; 0.13: stick abuse + fetch safe sentences; 0.12: video audio (sounds + speech); 0.11: text on images (OCR + word lists); 0.10: nude art; 0.9: swimwear / shirtless with a pet; 0.8: real dog fights; 0.7: nudity sentences; 0.6: suggestive pose + spiked muzzle; 0.5: NSFW on detector frames only; 0.4: D1-D3; 0.3: D4 items; 0.2: D5 + D6
+  version: gate2-0.16  # 0.16: no "toy gun" escape, pistol to the head; 0.15: chained performing animals; 0.14: slaughterhouse / carcasses; 0.13: stick abuse + fetch safe sentences; 0.12: video audio (sounds + speech); 0.11: text on images (OCR + word lists); 0.10: nude art; 0.9: swimwear / shirtless with a pet; 0.8: real dog fights; 0.7: nudity sentences; 0.6: suggestive pose + spiked muzzle; 0.5: NSFW on detector frames only; 0.4: D1-D3; 0.3: D4 items; 0.2: D5 + D6
   # true = act on Gate 2 (rejections, reviews, approvals). false = shadow mode: scores are
   # computed, reported and logged, nothing is approved, and a Gate 2 rejection only adds
   # the flag gate2_would_reject.
@@ -434,7 +514,7 @@ gate2:
     jpeg_quality_below: 30
   # D4 prohibited items (spec 4.4), app/gates/items.py. Extra queries in Gate 1's OWLv2 pass
   # (no extra model run): query -> gate2 signal. Every box takes the name it fits best, so
-  # the harmless look-alikes (null) catch toy guns and kitchen knives before they count.
+  # the harmless look-alikes (null) catch water guns and kitchen knives before they count.
   # Drug use on an animal and weapons pointed at someone need the whole scene: step 2e.
   items:
     # OWLv2 box score an item needs to count. 2026-10-27, 93 safe photos (easy set + hard-case
@@ -445,8 +525,10 @@ gate2:
       gun: item_firearm
       rifle: item_firearm
       pistol: item_firearm
-      toy gun: null
-      water gun: null
+      # No "toy gun" query any more (2026-10-28): it out-scored the real gun on a pistol held to a
+      # dog's head (toy gun 0.77 vs pistol 0.76) and on an airsoft rifle (0.87 vs gun 0.83), so
+      # real guns vanished. Anything gun-like now goes to a person; a toy gun costs a review.
+      water gun: null        # colourful water pistols; 0.16-0.30 on both real-gun photos
       large knife: item_weapon_knife
       machete: item_weapon_knife
       kitchen knife: null    # spec 4.4: an incidental kitchen knife is ignored
@@ -553,6 +635,13 @@ gate2:
         signals: [welfare_painful_restraint]
         sentences: [an animal tied up tightly with rope, a dog with its mouth taped shut,
                     a dog in a spiked muzzle and spiked harness]
+      # Chained performing animals (illegal in India for monkeys): a street-show monkey was
+      # approved 2026-10-28; 0.998 / 0.987 / 0.889 on it. The only "safe" picture above 0.2 is
+      # an organ-grinder with a chained monkey (hard_case pet folder) - the same thing.
+      performing_animal:
+        signals: [welfare_painful_restraint]
+        sentences: [a street performer with a chained monkey, a chained monkey performing for a crowd,
+                    a monkey on a chain for street performance]
       wounds:
         signals: [welfare_wounds]
         sentences: [an animal with open bleeding wounds, an injured animal with a deep wound]
@@ -599,7 +688,9 @@ gate2:
         sentences: ["a small amount of blood on an animal's fur", a pet with a little blood on it]
       weapon_pointed:
         signals: [violence_weapon_pointed]
-        sentences: [a person pointing a gun at an animal, "a knife held to an animal's throat"]
+        # "pistol held to a dog's head": 0.34 on a missed stock photo (2026-10-28), safe pictures 0.000
+        sentences: [a person pointing a gun at an animal, "a knife held to an animal's throat",
+                    "a pistol held to a dog's head"]
       drug_use:
         signals: [item_drug_use_on_animal]
         sentences: ["a person blowing smoke into a dog's face", an animal being given drugs]

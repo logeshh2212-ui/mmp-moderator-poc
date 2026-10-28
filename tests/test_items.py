@@ -26,7 +26,7 @@ DOG = box(0.9, "dog")
     ({"machete": 0.5}, {"item_weapon_knife"}),
     ({"gun": 0.2}, set()),                  # below gate2.items.min_score
     ({"machete": 0.36}, set()),             # measured false alarm on a pet photo
-    ({"toy gun": 0.9}, set()),              # harmless look-alike
+    ({"water gun": 0.9}, set()),            # harmless look-alike (no "toy gun" escape since 0.16)
     ({"kitchen knife": 0.9}, set()),        # spec 4.4: incidental kitchen knife = ignore
     ({}, set()),
 ])
@@ -77,8 +77,8 @@ def test_dog_with_a_gun_goes_to_a_human(tmp_path, models):
     assert "gate2_review" in response.flags
 
 
-def test_dog_with_a_toy_gun_is_approved(tmp_path, models):
-    models(SIGLIP_SURE, [DOG, item(0.8, "toy gun")], ("dog", 0.9))
+def test_dog_with_a_water_gun_is_approved(tmp_path, models):
+    models(SIGLIP_SURE, [DOG, item(0.8, "water gun")], ("dog", 0.9))
 
     response = orchestrator.run_pipeline(make_ctx(tmp_path))
 
@@ -94,6 +94,20 @@ def test_dog_next_to_a_beer_is_approved_with_a_flag(tmp_path, models):
     assert response.decision == "APPROVED"   # spec 4.4: accept, minor flag only
     assert response.dimension_scores.D4_prohibited == 90
     assert "item_alcohol" in response.flags
+
+
+def test_toy_gun_is_no_longer_a_query():
+    # it out-scored real guns (pistol at a dog's head, airsoft rifle), so real guns vanished
+    assert "toy gun" not in settings.gate2.items.queries
+
+
+def test_response_lists_every_detected_object(tmp_path, models):
+    models(SIGLIP_SURE, [DOG, item(0.6, "pistol")], ("dog", 0.9))
+
+    response = orchestrator.run_pipeline(make_ctx(tmp_path))
+
+    objects = [(o.label, o.kind, o.score) for o in response.objects_detected]
+    assert objects == [("dog", "animal", 0.9), ("pistol", "item", 0.6)]   # best score first
 
 
 def test_gun_without_any_animal_is_still_mod_001(tmp_path, models):

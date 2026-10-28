@@ -1,8 +1,10 @@
 import shutil
 import subprocess
+from io import BytesIO
 from time import perf_counter
 from uuid import uuid4
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -10,7 +12,7 @@ from app.core.config import settings
 from app.pipeline import orchestrator
 from app.pipeline.context import ModerationContext
 from app.prepare.images import prepare_image
-from app.prepare.video import prepare_video, sample_timestamps
+from app.prepare.video import decode, fit, prepare_video, sample_timestamps, select_expression
 from app.validation.errors import ProcessingTimeout
 
 
@@ -125,6 +127,38 @@ def test_rotated_phone_video_comes_out_upright(videos, tmp_path):
 
     width, height = prepare_video(rotated, 2.0).frames[0].detector.size
     assert width < height
+
+
+def test_two_pieces_give_exactly_the_same_frames(videos):
+    times = sample_timestamps(60.0)
+    whole = decode(videos["60s"], 60.0, times, None, 1)
+    halves = decode(videos["60s"], 60.0, times, None, 2)
+
+    assert len(halves) == len(whole) == len(times)
+    for (png_a, t_a), (png_b, t_b) in zip(whole, halves):
+        assert t_b == pytest.approx(t_a, abs=0.001)
+        assert np.array_equal(np.asarray(Image.open(BytesIO(png_a))), np.asarray(Image.open(BytesIO(png_b))))
+
+
+def test_gpu_decode_failure_falls_back_to_the_cpu(videos, monkeypatch, caplog):
+    monkeypatch.setattr(settings.prepare, "ffmpeg_hwaccel", "cuda")
+    if shutil.which("nvidia-smi"):
+        pytest.skip("this machine has an NVIDIA GPU: the GPU path would succeed")
+
+    media = prepare_video(videos["60s"], 60.0, 160, 120)
+
+    assert len(media.frames) == len(sample_timestamps(60.0))
+    assert "decoding on the CPU instead" in caplog.text
+
+
+def test_select_expression_adds_the_first_frame_only_for_time_zero():
+    assert select_expression([0.0, 1.0]).startswith("isnan(prev_t)")
+    assert "isnan" not in select_expression([30.0, 31.0])
+
+
+@pytest.mark.parametrize("w, h, expected", [(1920, 1080, (640, 360)), (1080, 1920, (360, 640)), (320, 240, (320, 240))])
+def test_gpu_resize_keeps_the_shape_inside_the_detector_size(w, h, expected):
+    assert fit(w, h, 640) == expected
 
 
 def test_frame_sampling_timeout(videos, monkeypatch):

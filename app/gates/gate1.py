@@ -20,6 +20,7 @@ class FrameDetections:
     lookalike: str | None = None      # best non-animal box, e.g. "statue (0.62)", for the log
     box: tuple[float, float, float, float] | None = None  # best animal box, detector picture pixels (D5)
     items: dict[str, float] = field(default_factory=dict)  # Gate 2 item query -> best box score (D4)
+    objects: dict[str, float] = field(default_factory=dict)  # every box's best name -> best score (response)
 
 
 @dataclass
